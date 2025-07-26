@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: spandaai-backend-staging
+
+namespace: spandaai-backend-staging
+
+resources:
+- ../../base
+
+commonLabels:
+  app.kubernetes.io/environment: staging
+
+images:
+- name: your-registry/spanda-backend
+  newTag: staging-latest

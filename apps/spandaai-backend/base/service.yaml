@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: spandaai-backend-service
+  labels:
+    app: spandaai-backend
+    app.kubernetes.io/name: spandaai-backend
+    app.kubernetes.io/part-of: spandaai-platform
+spec:
+  selector:
+    app: spandaai-backend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3001
+    protocol: TCP
+  type: ClusterIP

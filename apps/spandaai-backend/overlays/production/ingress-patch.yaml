@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: spandaai-backend-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://app.spandaai.com"
+spec:
+  tls:
+  - hosts:
+    - api.spandaai.com
+    secretName: spandaai-backend-prod-tls
+  rules:
+  - host: api.spandaai.com
+    http:
+      paths:
+      - path: /api(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: spandaai-backend-service
+            port:
+              number: 80

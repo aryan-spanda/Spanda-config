@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: spandaai-platform-apps
+  namespace: argocd
+spec:
+  generators:
+  - git:
+      repoURL: https://github.com/your-org/spandaai-config.git
+      revision: HEAD
+      directories:
+      - path: apps/*/overlays/production
+  template:
+    metadata:
+      name: '{{path[0]}}-prod'
+      labels:
+        app.kubernetes.io/managed-by: argocd-applicationset
+        app.kubernetes.io/part-of: spandaai-platform
+        app.kubernetes.io/environment: production
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/your-org/spandaai-config.git
+        targetRevision: HEAD
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{path[0]}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
