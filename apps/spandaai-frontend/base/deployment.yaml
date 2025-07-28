@@ -20,9 +20,9 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: your-registry/spanda-frontend:latest
+        image: ghcr.io/aryan-spanda/test-application-frontend:latest
         ports:
-        - containerPort: 3000
+        - containerPort: 80
           name: http
         env:
         - name: REACT_APP_API_URL
@@ -39,13 +39,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /
-            port: 3000
+            port: 80
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /
-            port: 3000
+            port: 80
           initialDelaySeconds: 5
           periodSeconds: 5
         securityContext:
