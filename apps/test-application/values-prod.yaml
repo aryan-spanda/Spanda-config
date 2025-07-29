@@ -2,8 +2,8 @@
 replicaCount: 3
 
 image:
-  repository: ghcr.io/aryan-spanda/test-application
-  tag: "latest"
+  repository: aryanpola/sample-application
+  tag: "b2060e48"
   pullPolicy: IfNotPresent
 
 imagePullSecrets:
