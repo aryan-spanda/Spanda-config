@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: test-application-prod
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: test-application
+    app.kubernetes.io/part-of: spandaai-platform
+    team: spanda-team
+    environment: production
+spec:
+  project: spandaai-platform
+  source:
+    repoURL: https://github.com/aryan-spanda/Test-Application.git
+    targetRevision: main
+    path: deploy/helm
+    helm:
+      valueFiles:
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: test-application
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+  revisionHistoryLimit: 10
