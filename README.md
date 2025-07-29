@@ -1,53 +1,72 @@
 # Spanda AI Platform - Configuration Repository
 
-This repository contains all Kubernetes manifests for the Spanda AI Platform applications. It follows GitOps principles where this repository is the **single source of truth** for what's deployed in your Kubernetes clusters.
+This repository contains all deployment configurations for the Spanda AI Platform applications using GitOps principles. It serves as the **single source of truth** for what's deployed in your Kubernetes clusters.
 
-## Repository Structure
+## 🎯 Repository Purpose
+
+This config repository follows the GitOps pattern where:
+- **Source code** lives in application repositories (e.g., Test-Application)
+- **Deployment configurations** live here in the config repository
+- **ArgoCD** monitors this repository and automatically deploys changes to Kubernetes
+
+## 📁 Repository Structure
 
 ```
 config-repo/
-├── apps/                              # Application configurations
-│   ├── spandaai-frontend/
-│   │   ├── base/                      # Base Kubernetes manifests
-│   │   │   ├── deployment.yaml
-│   │   │   ├── service.yaml
-│   │   │   ├── ingress.yaml
-│   │   │   ├── configmap.yaml
-│   │   │   └── kustomization.yaml
-│   │   └── overlays/                  # Environment-specific overrides
-│   │       ├── production/
-│   │       │   ├── replicas.yaml
-│   │       │   ├── ingress-patch.yaml
-│   │       │   ├── configmap-patch.yaml
-│   │       │   └── kustomization.yaml
-│   │       └── staging/
-│   │           ├── replicas.yaml
-│   │           └── kustomization.yaml
-│   │
-│   └── spandaai-backend/
-│       ├── base/                      # Base Kubernetes manifests
-│       │   ├── deployment.yaml
-│       │   ├── service.yaml
-│       │   ├── ingress.yaml
-│       │   ├── sealed-secret.yaml
-│       │   └── kustomization.yaml
-│       └── overlays/                  # Environment-specific overrides
-│           ├── production/
-│           │   ├── replicas.yaml
-│           │   ├── ingress-patch.yaml
-│           │   └── kustomization.yaml
-│           └── staging/
-│               └── kustomization.yaml
+├── 🚀 landing-zone/                   # ArgoCD Application definitions
+│   └── applications/
+│       ├── test-application-prod.yaml      # Production ArgoCD app
+│       ├── test-application-staging.yaml   # Staging ArgoCD app
+│       └── README.md
 │
-├── cluster-config/                    # Cluster-wide configurations
-│   ├── argocd/
-│   │   ├── applications.yaml          # Individual ArgoCD Applications
-│   │   └── app-of-apps.yaml          # ApplicationSet for auto-discovery
-│   ├── ingress-nginx/
-│   │   └── controller.yaml           # Ingress controller configuration
+├── 📱 apps/                          # Application-specific configurations
+│   └── test-application/
+│       ├── Chart.yaml                # Helm chart metadata
+│       ├── values-prod.yaml          # Production values
+│       ├── values-staging.yaml       # Staging values
+│       └── templates/                # Kubernetes templates
+│           ├── _helpers.tpl
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           ├── ingress.yaml
+│           ├── serviceaccount.yaml
+│           ├── configmap.yaml
+│           └── hpa.yaml
+│
+├── 🏗️ infrastructure/               # Infrastructure as Code (Future)
+│   ├── namespaces/
+│   ├── rbac/
 │   └── monitoring/
-│       └── prometheus.yaml           # Monitoring stack
 │
+└── 📚 docs/                         # Documentation
+    └── README.md
+```
+
+## 🔄 GitOps Flow
+
+### How Automatic Deployments Work
+
+1. **Code Push**: Developer pushes code to Test-Application repository
+2. **CI/CD Pipeline**: GitHub Actions runs tests and builds Docker image
+3. **Image Push**: New image pushed to GitHub Container Registry (GHCR)
+4. **Config Update**: GitHub Actions automatically updates image tags in this repository
+5. **ArgoCD Sync**: ArgoCD detects changes and deploys to Kubernetes cluster
+
+## 🌍 Environment Configuration
+
+### Production (`values-prod.yaml`)
+- **Replicas**: 3 pods for high availability
+- **Resources**: 1 CPU, 1Gi memory limits
+- **Autoscaling**: 3-10 replicas based on CPU/memory
+- **Ingress**: TLS enabled with Let's Encrypt
+- **Security**: Read-only filesystem, non-root user
+
+### Staging (`values-staging.yaml`)
+- **Replicas**: 1 pod for cost efficiency
+- **Resources**: 500m CPU, 512Mi memory limits
+- **Autoscaling**: Disabled
+- **Ingress**: HTTP only for testing
+- **Security**: Same security context as production
 ├── scripts/                          # Helper scripts
 │   ├── update-image.sh              # Update Docker image tags
 │   └── validate-kustomize.sh        # Validate Kustomization files

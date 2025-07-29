@@ -20,9 +20,9 @@ metadata:
 spec:
   project: spandaai-platform
   source:
-    repoURL: https://github.com/aryan-spanda/Test-Application.git
+    repoURL: https://github.com/aryan-spanda/config-repo.git
     targetRevision: main
-    path: deploy/helm
+    path: apps/test-application
     helm:
       valueFiles:
         - values-prod.yaml

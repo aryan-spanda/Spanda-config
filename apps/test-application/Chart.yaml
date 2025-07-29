@@ -1,0 +1,16 @@
+apiVersion: v2
+name: test-application
+description: Test Application Helm Chart for GitOps deployment
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - test-application
+  - nodejs
+  - spandaai-platform
+home: https://github.com/aryan-spanda/Test-Application
+sources:
+  - https://github.com/aryan-spanda/Test-Application
+maintainers:
+  - name: Spanda Team
+    email: team@spandaai.com
