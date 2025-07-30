@@ -3,7 +3,7 @@ replicaCount: 1
 
 image:
   repository: aryanpola/sample-application
-  tag: "b2060e48"
+  tag: "ce0254c3"
   pullPolicy: Always
 
 imagePullSecrets:
