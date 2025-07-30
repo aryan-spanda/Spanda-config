@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/your-org/spandaai-config.git
-    targetRevision: main
+    targetRevision: cicd
     path: apps/spandaai-frontend/overlays/production
   destination:
     server: https://kubernetes.default.svc
@@ -40,7 +40,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/your-org/spandaai-config.git
-    targetRevision: main
+    targetRevision: cicd
     path: apps/spandaai-backend/overlays/production
   destination:
     server: https://kubernetes.default.svc
