@@ -1,0 +1,250 @@
+name: Auto-Deploy Application from Config
+
+on:
+  # Triggered when an application repo pushes changes
+  repository_dispatch:
+    types: [deploy-application]
+  
+  # Also allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      app_repo_url:
+        description: 'Application repository URL'
+        required: true
+        type: string
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+permissions:
+  contents: write
+  packages: read
+  actions: read
+
+env:
+  APP_REPO_URL: ${{ github.event.client_payload.app_repo_url || inputs.app_repo_url }}
+  ENVIRONMENT: ${{ github.event.client_payload.environment || inputs.environment || 'staging' }}
+  IMAGE_TAG: ${{ github.event.client_payload.image_tag || 'latest' }}
+  APP_NAME: ${{ github.event.client_payload.app_name || '' }}
+
+jobs:
+  fetch-and-generate:
+    runs-on: ubuntu-latest
+    outputs:
+      app-name: ${{ steps.parse-config.outputs.app-name }}
+      image-repo: ${{ steps.parse-config.outputs.image-repo }}
+      
+    steps:
+    - name: Debug payload
+      run: |
+        echo "🔍 Repository dispatch payload:"
+        echo "  APP_REPO_URL: $APP_REPO_URL"
+        echo "  ENVIRONMENT: $ENVIRONMENT"
+        echo "  IMAGE_TAG: $IMAGE_TAG"
+        echo "  APP_NAME: $APP_NAME"
+        echo ""
+        echo "🔍 Full event context:"
+        echo '${{ toJson(github.event) }}'
+        
+    - name: Checkout config repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install dependencies
+      run: |
+        # Install yq for YAML parsing
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+
+    - name: Extract repo info
+      id: repo-info
+      run: |
+        # Extract owner and repo name from URL
+        REPO_PATH=$(echo "$APP_REPO_URL" | sed 's|https://github.com/||' | sed 's|\.git$||')
+        echo "repo-path=$REPO_PATH" >> $GITHUB_OUTPUT
+        echo "Extracted repo path: $REPO_PATH"
+
+    - name: Fetch application configuration
+      run: |
+        REPO_PATH="${{ steps.repo-info.outputs.repo-path }}"
+        
+        # Download spanda-app.yaml from the application repository
+        curl -H "Accept: application/vnd.github.v3.raw" \
+             -L "https://api.github.com/repos/$REPO_PATH/contents/spanda-app.yaml" \
+             -o spanda-app.yaml
+        
+        if [ ! -f spanda-app.yaml ]; then
+          echo "❌ spanda-app.yaml not found in repository!"
+          exit 1
+        fi
+        
+        echo "✅ Successfully fetched application configuration"
+        cat spanda-app.yaml
+
+    - name: Parse application configuration
+      id: parse-config
+      run: |
+        APP_NAME=$(yq eval '.app.name' spanda-app.yaml)
+        IMAGE_REPO=$(yq eval '.app.repository' spanda-app.yaml)
+        APP_TEAM=$(yq eval '.app.team' spanda-app.yaml)
+        
+        echo "app-name=$APP_NAME" >> $GITHUB_OUTPUT
+        echo "image-repo=$IMAGE_REPO" >> $GITHUB_OUTPUT
+        echo "app-team=$APP_TEAM" >> $GITHUB_OUTPUT
+        
+        echo "Parsed configuration:"
+        echo "  App Name: $APP_NAME"
+        echo "  Image Repo: $IMAGE_REPO"
+        echo "  Team: $APP_TEAM"
+        echo "  Environment: $ENVIRONMENT"
+
+    - name: Generate Kubernetes manifests
+      run: |
+        chmod +x scripts/generate-app-manifests.sh
+        ./scripts/generate-app-manifests.sh spanda-app.yaml "$ENVIRONMENT" "$IMAGE_TAG"
+
+    - name: Commit generated files
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        APP_NAME="${{ steps.parse-config.outputs.app-name }}"
+        
+        git add apps/$APP_NAME/
+        git add landing-zone/applications/$APP_NAME-$ENVIRONMENT.yaml
+        git add platform/applications/$APP_NAME-platform.yaml
+        
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "🚀 Auto-generated manifests for $APP_NAME ($ENVIRONMENT)"
+          git push origin main
+          echo "✅ Pushed generated manifests to repository"
+        fi
+
+  deploy-to-cluster:
+    needs: fetch-and-generate
+    runs-on: ubuntu-latest
+    if: ${{ needs.fetch-and-generate.outputs.app-name }}
+    
+    steps:
+    - name: Checkout config repository
+      uses: actions/checkout@v4
+      with:
+        ref: main  # Get the latest changes
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+
+    - name: Apply namespace and basic resources
+      run: |
+        APP_NAME="${{ needs.fetch-and-generate.outputs.app-name }}"
+        
+        # Apply namespace first
+        if [ -f "apps/$APP_NAME/namespace.yaml" ]; then
+          kubectl apply -f apps/$APP_NAME/namespace.yaml
+        fi
+        
+        # Apply all application manifests
+        kubectl apply -f apps/$APP_NAME/
+
+    - name: Deploy ArgoCD Application
+      run: |
+        APP_NAME="${{ needs.fetch-and-generate.outputs.app-name }}"
+        ARGOCD_APP="landing-zone/applications/$APP_NAME-$ENVIRONMENT.yaml"
+        
+        if [ -f "$ARGOCD_APP" ]; then
+          # Check if application already exists
+          if kubectl get application $APP_NAME-$ENVIRONMENT -n argocd >/dev/null 2>&1; then
+            echo "ArgoCD application already exists, updating..."
+            kubectl apply -f "$ARGOCD_APP"
+          else
+            echo "Creating new ArgoCD application..."
+            kubectl apply -f "$ARGOCD_APP"
+          fi
+          
+          # Wait for sync
+          echo "Waiting for ArgoCD application to sync..."
+          kubectl wait --for=condition=Synced application/$APP_NAME-$ENVIRONMENT -n argocd --timeout=300s || true
+        fi
+
+    - name: Apply platform modules
+      run: |
+        APP_NAME="${{ needs.fetch-and-generate.outputs.app-name }}"
+        PLATFORM_CONFIG="platform/applications/$APP_NAME-platform.yaml"
+        
+        if [ -f "$PLATFORM_CONFIG" ]; then
+          kubectl apply -f "$PLATFORM_CONFIG"
+          echo "✅ Applied platform modules configuration"
+        fi
+
+    - name: Verify deployment
+      run: |
+        APP_NAME="${{ needs.fetch-and-generate.outputs.app-name }}"
+        NAMESPACE="$APP_NAME-$ENVIRONMENT"
+        
+        echo "🔍 Deployment verification for $APP_NAME in $NAMESPACE:"
+        echo ""
+        
+        # Check namespace
+        kubectl get namespace "$NAMESPACE" || echo "❌ Namespace not found"
+        
+        # Check deployments
+        echo "📦 Deployments:"
+        kubectl get deployments -n "$NAMESPACE" || echo "No deployments found"
+        
+        # Check services
+        echo "🔗 Services:"
+        kubectl get services -n "$NAMESPACE" || echo "No services found"
+        
+        # Check ingress
+        echo "🌐 Ingress:"
+        kubectl get ingress -n "$NAMESPACE" || echo "No ingress found"
+        
+        # Check pods
+        echo "🐳 Pods:"
+        kubectl get pods -n "$NAMESPACE" || echo "No pods found"
+
+  notify-completion:
+    needs: [fetch-and-generate, deploy-to-cluster]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Deployment notification
+      run: |
+        APP_NAME="${{ needs.fetch-and-generate.outputs.app-name }}"
+        IMAGE_REPO="${{ needs.fetch-and-generate.outputs.image-repo }}"
+        
+        if [ "${{ needs.deploy-to-cluster.result }}" == "success" ]; then
+          echo "🎉 Successfully deployed $APP_NAME to $ENVIRONMENT!"
+          echo ""
+          echo "📋 Deployment Summary:"
+          echo "  🏷️  Application: $APP_NAME"
+          echo "  🐳 Image Repository: $IMAGE_REPO"
+          echo "  🌍 Environment: $ENVIRONMENT"
+          echo "  📦 Source: $APP_REPO_URL"
+          echo ""
+          echo "🔗 Access your application:"
+          echo "  📊 ArgoCD: https://argocd.yourdomain.com"
+          echo "  📈 Grafana: https://grafana.yourdomain.com"
+          echo "  🌐 Application: https://$ENVIRONMENT.yourdomain.com"
+        else
+          echo "❌ Deployment failed for $APP_NAME"
+          echo "Check the logs above for details"
+          exit 1
+        fi

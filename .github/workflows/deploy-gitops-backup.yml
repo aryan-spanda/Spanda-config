@@ -1,0 +1,341 @@
+name: Build and Deploy with GitOps
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+  packages: write
+  # Add security-events permission for uploading SARIF results
+  security-events: write
+
+env:
+  # Using Docker Hub as established
+  REGISTRY: docker.io
+  IMAGE_NAME: aryanpola/sample-application
+  # Your configuration repository - this should match your actual GitHub repo name
+  CONFIG_REPO: aryan-spanda/Spanda-config
+  TARGET_BRANCH: main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run tests
+      run: npm test
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      short-sha: ${{ steps.vars.outputs.short-sha }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up variables
+      id: vars
+      run: |
+        echo "short-sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short-sha }},${{ env.IMAGE_NAME }}:latest
+
+  update-gitops-config:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout config repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.CONFIG_REPO }}
+        token: ${{ secrets.GITOPS_PAT }}
+        ref: ${{ env.TARGET_BRANCH }}
+
+    - name: Debug repository structure
+      run: |
+        echo "=== Repository root contents ==="
+        ls -la
+        echo ""
+        echo "=== Apps directory contents ==="
+        if [ -d "apps" ]; then
+          ls -la apps/
+          echo ""
+          echo "=== Apps subdirectories ==="
+          find apps/ -type d
+          echo ""
+          echo "=== All YAML files in apps ==="
+          find apps/ -name "*.yaml" -o -name "*.yml"
+        else
+          echo "apps directory not found!"
+        fi
+
+    - name: Update Helm values image tag
+      run: |
+        NEW_TAG="${{ needs.build-and-push.outputs.short-sha }}"
+        
+        # Try multiple possible file locations
+        POSSIBLE_FILES=(
+          "apps/test-application/values-staging.yaml"
+          "apps/test-application/values-prod.yaml"
+          "apps/spandaai-backend/values-prod.yaml"
+          "apps/spandaai-frontend/values-prod.yaml"
+          "config-repo/apps/test-application/values-prod.yaml"
+          "Test-Application/values-prod.yaml"
+        )
+        
+        TARGET_FILE=""
+        for file in "${POSSIBLE_FILES[@]}"; do
+          if [ -f "$file" ]; then
+            TARGET_FILE="$file"
+            echo "Found target file: $TARGET_FILE"
+            break
+          fi
+        done
+        
+        if [ -z "$TARGET_FILE" ]; then
+          echo "Error: No suitable values file found!"
+          echo "Searched for:"
+          for file in "${POSSIBLE_FILES[@]}"; do
+            echo "  - $file"
+          done
+          exit 1
+        fi
+        
+        # Update the image repository to Docker Hub
+        sed -i "s|repository: .*|repository: ${{ env.IMAGE_NAME }}|g" "$TARGET_FILE"
+        # Update the image tag
+        sed -i "s|tag: .*|tag: \"${NEW_TAG}\"|g" "$TARGET_FILE"
+        echo "Updated $TARGET_FILE with:"
+        echo "  Repository: ${{ env.IMAGE_NAME }}"
+        echo "  Tag: ${NEW_TAG}"
+        
+        git diff
+
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        if git diff --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+        
+        NEW_TAG="${{ needs.build-and-push.outputs.short-sha }}"
+        git add .
+        git commit -m "🚀 Update test-application image to ${{ env.IMAGE_NAME }}:${NEW_TAG}"
+        git push origin ${{ env.TARGET_BRANCH }}
+
+  deploy-to-argocd:
+    needs: [build-and-push, update-gitops-config]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout config repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.CONFIG_REPO }}
+        token: ${{ secrets.GITOPS_PAT }}
+        ref: ${{ env.TARGET_BRANCH }}
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        # Create kubeconfig from secrets
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+
+    - name: Apply ArgoCD Application
+      run: |
+        # Check if application already exists
+        if kubectl get application test-application-staging -n argocd >/dev/null 2>&1; then
+          echo "Application test-application-staging already exists"
+          # Optionally sync the application
+          kubectl patch application test-application-staging -n argocd --type='merge' -p='{"operation":{"sync":{"syncStrategy":{"hook":{"force":true}}}}}'
+        else
+          echo "Creating new ArgoCD application"
+          kubectl apply -f landing-zone/applications/test-application-staging.yaml
+        fi
+
+    - name: Wait for application sync
+      run: |
+        echo "Waiting for ArgoCD to sync the application..."
+        kubectl wait --for=condition=Synced application/test-application-staging -n argocd --timeout=300s || true
+        
+        # Show application status
+        kubectl get application test-application-staging -n argocd -o wide
+
+  deploy-platform-modules:
+    needs: [build-and-push, update-gitops-config]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout application repository
+      uses: actions/checkout@v4
+      
+    - name: Checkout platform repository
+      uses: actions/checkout@v4
+      with:
+        repository: spandaai/spandaai-platform-terraform-deployment
+        token: ${{ secrets.GITOPS_PAT }}
+        path: platform
+        
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.0.0
+        
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+
+    - name: Parse platform module configuration
+      run: |
+        # Check if platform-modules.yaml exists
+        if [ ! -f "platform-modules.yaml" ]; then
+          echo "No platform-modules.yaml found - skipping platform module deployment"
+          exit 0
+        fi
+        
+        echo "Platform modules configuration found. Parsing enabled modules..."
+        
+        # Extract enabled modules using yq (install if not available)
+        if ! command -v yq &> /dev/null; then
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+        fi
+        
+        # Get enabled modules
+        ENABLED_MODULES=$(yq eval '.data | to_entries | .[] | select(.value == "enabled") | .key' platform-modules.yaml)
+        echo "Enabled modules: $ENABLED_MODULES"
+        
+        # Export for next steps
+        echo "ENABLED_MODULES<<EOF" >> $GITHUB_ENV
+        echo "$ENABLED_MODULES" >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
+        
+    - name: Deploy platform modules with Terraform
+      run: |
+        if [ -z "$ENABLED_MODULES" ]; then
+          echo "No enabled modules found - skipping deployment"
+          exit 0
+        fi
+        
+        cd .platform/terraform
+        
+        # Initialize Terraform
+        terraform init
+        
+        # Set variables for deployment
+        export TF_VAR_image_tag="${{ needs.build-and-push.outputs.short-sha }}"
+        export TF_VAR_app_name="test-application"
+        export TF_VAR_namespace="test-application-staging"
+        export TF_VAR_image_name="${{ env.IMAGE_NAME }}"
+        
+        # Plan the deployment
+        terraform plan -out=tfplan
+        
+        # Apply the platform modules
+        terraform apply -auto-approve tfplan
+        
+        # Show outputs
+        terraform output
+        
+    - name: Verify platform module deployment
+      run: |
+        echo "Verifying platform module deployment..."
+        
+        # Check if namespace was created
+        kubectl get namespace test-application-staging || echo "Namespace not found"
+        
+        # Check for load balancer services
+        kubectl get services -n test-application-staging || echo "No services found"
+        
+        # Check for any new resources created by platform modules
+        kubectl get all -n test-application-staging || echo "No resources found"
+        
+        # Display events for troubleshooting
+        kubectl get events -n test-application-staging --sort-by='.lastTimestamp' || echo "No events found"
+
+  security-scan:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+    # --- THIS STEP WAS ADDED ---
+    # The upload-sarif action needs access to the repository code.
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short-sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        # This optimization makes the scan much faster
+        scanners: 'vuln'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  notify-deployment:
+    needs: [build-and-push, update-gitops-config, deploy-to-argocd, deploy-platform-modules]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Deployment notification
+      run: |
+        if [ "${{ needs.update-gitops-config.result }}" == "success" ] && [ "${{ needs.deploy-to-argocd.result }}" == "success" ] && [ "${{ needs.deploy-platform-modules.result }}" == "success" ]; then
+          echo "✅ Successfully completed full GitOps deployment with platform modules!"
+          echo "🐳 Image: ${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short-sha }}"
+          echo "📦 GitOps config updated in repository"
+          echo "🚀 ArgoCD application deployed and syncing"
+          echo "🏗️ Platform modules deployed successfully"
+          echo "🌐 Check your application at your ingress URL"
+        else
+          echo "❌ Deployment failed. Check logs for details:"
+          echo "  - GitOps Config: ${{ needs.update-gitops-config.result }}"
+          echo "  - ArgoCD Deploy: ${{ needs.deploy-to-argocd.result }}"
+          echo "  - Platform Modules: ${{ needs.deploy-platform-modules.result }}"
+          exit 1
+        fi

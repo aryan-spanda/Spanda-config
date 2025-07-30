@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: CLIENT-APP-NAME-staging
+  namespace: argocd
+  annotations:
+    platform.spandaai.com/client-email: "client@company.com"
+    platform.spandaai.com/onboarded-date: "2025-07-30T10:00:00Z"
+  labels:
+    app.kubernetes.io/name: CLIENT-APP-NAME
+    app.kubernetes.io/part-of: spandaai-platform
+    environment: staging
+    client-managed: "true"
+spec:
+  project: spandaai-platform
+  source:
+    repoURL: https://github.com/CLIENT-USERNAME/CLIENT-REPO-NAME  # 👈 CLIENT REPO URL HERE
+    targetRevision: main
+    path: .
+    helm:
+      valueFiles:
+        - platform-values.yaml  # Client must add this file to their repo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: CLIENT-APP-NAME-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+  revisionHistoryLimit: 5
