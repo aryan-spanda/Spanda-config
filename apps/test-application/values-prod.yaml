@@ -87,7 +87,7 @@ healthCheck:
 # Readiness probe configuration
 readinessProbe:
   enabled: true
-  path: /ready
+  path: /health
   initialDelaySeconds: 5
   periodSeconds: 5
   timeoutSeconds: 3

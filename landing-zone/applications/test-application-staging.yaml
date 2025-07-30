@@ -7,7 +7,7 @@ metadata:
     # ArgoCD Image Updater configuration for staging
     argocd-image-updater.argoproj.io/image-list: test-app=aryanpola/sample-application
     argocd-image-updater.argoproj.io/test-app.update-strategy: latest
-    argocd-image-updater.argoproj.io/test-app.allow-tags: regexp:^(latest|main-.+)$
+    argocd-image-updater.argoproj.io/test-app.allow-tags: regexp:^(latest|[a-f0-9]{8})$
     argocd-image-updater.argoproj.io/test-app.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/test-app.helm.image-tag: image.tag
     argocd-image-updater.argoproj.io/write-back-method: git
