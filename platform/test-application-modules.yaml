@@ -1,0 +1,77 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: test-application-platform-modules
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: test-application-platform-modules
+    app.kubernetes.io/part-of: spanda-platform
+spec:
+  generators:
+  # Generator that reads platform module configuration from Test-Application repo
+  - git:
+      repoURL: https://github.com/aryan-spanda/Test-Application.git
+      revision: HEAD
+      files:
+      - path: "platform-modules.yaml"
+  
+  # Additional generator for static platform modules (always enabled)
+  - list:
+      elements:
+      - module: "argocd"
+        enabled: "true"
+        repository: "https://github.com/spandaai/spandaai-platform-terraform-deployment.git"
+        path: "bare-metal/modules/argocd"
+        namespace: "argocd"
+        
+  template:
+    metadata:
+      name: 'test-application-{{module}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: 'test-application-{{module}}'
+        app.kubernetes.io/component: platform-module
+        app.kubernetes.io/part-of: test-application
+        platform.spanda.ai/module: '{{module}}'
+    spec:
+      project: default
+      
+      source:
+        repoURL: '{{repository}}'
+        path: '{{path}}'
+        targetRevision: HEAD
+        
+        # For Terraform modules, use plugin
+        plugin:
+          name: terraform
+          env:
+          - name: TF_VAR_app_name
+            value: "test-application"
+          - name: TF_VAR_namespace
+            value: "test-application-staging"
+          - name: TF_VAR_image_name
+            value: "aryanpola/sample-application"
+            
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+        
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+        - PrunePropagationPolicy=foreground
+        - PruneLast=true
+        
+      # Health checks for platform modules
+      ignoreDifferences:
+      - group: apps
+        kind: Deployment
+        jsonPointers:
+        - /spec/replicas
+        
+  # Sync waves for proper deployment order
+  syncPolicy:
+    preserveResourcesOnDeletion: false

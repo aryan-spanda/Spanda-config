@@ -1,0 +1,107 @@
+name: Build and Deploy Application
+
+on:
+  push:
+    branches: [main, develop]
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Update GitOps Configuration
+      if: github.ref == 'refs/heads/main'
+      env:
+        GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
+        IMAGE_TAG: ${{ steps.meta.outputs.version }}
+        APP_NAME: ${{ github.event.repository.name }}
+      run: |
+        # Clone the config repository
+        git clone https://$GITOPS_PAT@github.com/aryan-spanda/spanda-config.git
+        cd spanda-config
+        
+        # Configure git
+        git config user.name "GitHub Actions Bot"
+        git config user.email "actions@github.com"
+        
+        # Create or update application configuration
+        mkdir -p apps/$APP_NAME
+        
+        # Update or create the application values file
+        cat > apps/$APP_NAME/values.yaml << EOF
+        app:
+          name: $APP_NAME
+          image:
+            repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            tag: $IMAGE_TAG
+          namespace: $APP_NAME-prod
+        EOF
+        
+        # Create ArgoCD application if it doesn't exist
+        if [ ! -f "landing-zone/applications/$APP_NAME.yaml" ]; then
+          cat > landing-zone/applications/$APP_NAME.yaml << EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: $APP_NAME
+          namespace: argocd
+        spec:
+          project: default
+          source:
+            repoURL: https://github.com/aryan-spanda/spanda-config.git
+            path: apps/$APP_NAME
+            targetRevision: HEAD
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: $APP_NAME-prod
+          syncPolicy:
+            automated:
+              prune: true
+              selfHeal: true
+            syncOptions:
+            - CreateNamespace=true
+        EOF
+        fi
+        
+        # Commit and push changes
+        git add .
+        git commit -m "Deploy $APP_NAME version $IMAGE_TAG" || echo "No changes to commit"
+        git push

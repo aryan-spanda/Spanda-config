@@ -1,0 +1,65 @@
+# Client Application Helm Values Template
+# Clients customize these values for their application
+
+app:
+  name: "CHANGE_ME"  # Client sets their app name
+  
+image:
+  repository: "CHANGE_ME/CHANGE_ME"  # Client sets their image
+  tag: "latest"
+  pullPolicy: IfNotPresent
+  
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000  # Client sets their app port
+  
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: "CHANGE_ME.example.com"  # Client sets their domain
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: "CHANGE_ME-tls"
+      hosts:
+        - "CHANGE_ME.example.com"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+# Environment variables for the application
+env:
+  - name: NODE_ENV
+    value: "production"
+  # Client adds their environment variables here
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /health  # Client adjusts health check path
+    port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /ready  # Client adjusts readiness check path
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 5
