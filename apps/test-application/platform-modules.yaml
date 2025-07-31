@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-modules-config
+  labels:
+    app: test-application
+    component: platform-config
+data:
+  # Networking modules
+  net-vpc-baremetal: "enabled"           # Virtual private cloud networking
+  net-lb-baremetal: "enabled"            # Load balancer module
+  net-lb-app-external-baremetal: "enabled"  # External app load balancer
+  net-firewall-baremetal: "enabled"      # Firewall rules
+  
+  # Infrastructure modules
+  argocd: "enabled"                       # ArgoCD for GitOps
+  
+  # Optional modules (disabled by default)
+  net-lb-app-internal-baremetal: "disabled"  # Internal app load balancer
+  net-address-baremetal: "disabled"      # Additional IP addressing
+  spanda-applications: "disabled"        # Full Spanda AI suite
+---
+# Module configuration overrides
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-modules-config-overrides
+  labels:
+    app: test-application
+    component: platform-overrides
+data:
+  # Test application specific overrides
+  test-app-namespace: "test-application-staging"
+  test-app-replicas: "2"
+  test-app-image: "aryanpola/sample-application" # docker hub
+  
+  # Networking overrides
+  vpc-cidr: "10.0.0.0/16"
+  lb-type: "external"
+  
+  # Load balancer configuration
+  lb-external-ip-range: "192.168.1.100-192.168.1.110"

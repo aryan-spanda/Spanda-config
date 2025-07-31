@@ -11,7 +11,7 @@ keywords:
   - metallb
 home: https://github.com/aryan-spanda/Spanda-config
 sources:
-  - https://github.com/aryan-spanda/spandaai-platform-deployment
+  - https://github.com/spandaai/spandaai-platform-terraform-deployment
 maintainers:
   - name: Spanda Platform Team
     email: platform@spanda.ai

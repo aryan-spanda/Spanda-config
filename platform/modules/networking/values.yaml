@@ -22,7 +22,7 @@ application:
   
 # Reference to platform deployment modules
 platformModules:
-  repository: "https://github.com/aryan-spanda/spandaai-platform-deployment.git"
+  repository: "https://github.com/spandaai/spandaai-platform-terraform-deployment.git"
   revision: "main"
   basePath: "bare-metal/modules"
   

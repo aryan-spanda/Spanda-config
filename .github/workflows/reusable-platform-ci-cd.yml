@@ -1,0 +1,382 @@
+# Reusable Platform CI/CD Workflow
+# This workflow is owned and maintained by the Platform Team
+# Application developers call this workflow with their specific parameters
+
+name: Reusable Platform CI/CD
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: 'Name of the application (used for file paths and ArgoCD app names)'
+        required: true
+        type: string
+      docker_image_name:
+        description: 'Docker image name (e.g., myorg/myapp)'
+        required: true
+        type: string
+      config_repo:
+        description: 'Configuration repository name'
+        required: false
+        type: string
+        default: 'aryan-spanda/Spanda-config'
+      target_branch:
+        description: 'Target branch for deployment'
+        required: false
+        type: string
+        default: 'main'
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '18'
+      dockerfile_path:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: './Dockerfile'
+      docker_context:
+        description: 'Docker build context'
+        required: false
+        type: string
+        default: '.'
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: 'Docker Hub username'
+        required: true
+      DOCKERHUB_TOKEN:
+        description: 'Docker Hub access token'
+        required: true
+      GITOPS_PAT:
+        description: 'Personal Access Token for GitOps config repository'
+        required: true
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ inputs.docker_image_name }}
+  CONFIG_REPO: ${{ inputs.config_repo }}
+  TARGET_BRANCH: ${{ inputs.target_branch }}
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout application code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        if [ -f "package.json" ]; then
+          # Check if it's a workspace (monorepo)
+          if grep -q '"workspaces"' package.json; then
+            npm run install:all || npm install
+          else
+            npm ci
+          fi
+        else
+          echo "No package.json found, skipping npm install"
+        fi
+
+    - name: Run tests
+      run: npm test
+      continue-on-error: false
+
+  process-platform-requirements:
+    name: Process Platform Requirements
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      platform-config: ${{ steps.generate-config.outputs.platform-config }}
+
+    steps:
+    - name: Checkout application code
+      uses: actions/checkout@v4
+
+    - name: Process platform requirements
+      id: generate-config
+      run: |
+        if [ -f "platform-requirements.yml" ]; then
+          echo "Found platform-requirements.yml, processing..."
+          
+          # Install yq for YAML processing
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+          
+          # Extract environment (default to staging)
+          ENV=$(yq '.app.environment // "staging"' platform-requirements.yml)
+          echo "Target environment: $ENV"
+          
+          # Generate platform configuration based on requirements
+          cat > platform-config.yaml << EOF
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: platform-modules-config
+          labels:
+            app: ${{ inputs.app_name }}
+            component: platform-config
+            environment: $ENV
+        data:
+          # Core networking (always enabled for web apps)
+          net-vpc-baremetal: "$(yq '.shared.modules.vpc_networking // true' platform-requirements.yml)"
+          net-firewall-baremetal: "$(yq '.shared.modules.firewall // true' platform-requirements.yml)"
+          
+          # Frontend modules
+          net-lb-app-external-baremetal: "$(yq '.frontend.modules.external_load_balancer // false' platform-requirements.yml)"
+          ssl-termination: "$(yq '.frontend.modules.ssl_termination // false' platform-requirements.yml)"
+          cdn: "$(yq '.frontend.modules.cdn // false' platform-requirements.yml)"
+          waf: "$(yq '.frontend.modules.waf // false' platform-requirements.yml)"
+          
+          # Backend modules  
+          net-lb-app-internal-baremetal: "$(yq '.backend.modules.internal_load_balancer // false' platform-requirements.yml)"
+          external-api-access: "$(yq '.backend.modules.external_api_access // false' platform-requirements.yml)"
+          service-mesh: "$(yq '.backend.modules.service_mesh // false' platform-requirements.yml)"
+          
+          # Infrastructure modules
+          argocd: "enabled"  # Always enabled for GitOps
+          monitoring: "$(yq '.backend.modules.monitoring // true' platform-requirements.yml)"
+          logging: "$(yq '.shared.modules.logging // true' platform-requirements.yml)"
+          secrets-management: "$(yq '.shared.modules.secrets_management // true' platform-requirements.yml)"
+          
+          # Optional modules
+          backup: "$(yq '.shared.optional.backup // false' platform-requirements.yml)"
+          disaster-recovery: "$(yq '.shared.optional.disaster_recovery // false' platform-requirements.yml)"
+          compliance-scanning: "$(yq '.shared.optional.compliance_scanning // false' platform-requirements.yml)"
+        ---
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: platform-modules-config-overrides
+          labels:
+            app: ${{ inputs.app_name }}
+            component: platform-overrides
+            environment: $ENV
+        data:
+          # Application configuration
+          app-namespace: "${{ inputs.app_name }}-$ENV"
+          app-image: "${{ inputs.docker_image_name }}"
+          
+          # Frontend configuration
+          frontend-enabled: "$(yq '.frontend.enabled // false' platform-requirements.yml)"
+          frontend-framework: "$(yq '.frontend.framework // "none"' platform-requirements.yml)"
+          frontend-port: "$(yq '.frontend.config.port // 3000' platform-requirements.yml)"
+          frontend-domain: "$(yq '.frontend.config.domain // ""' platform-requirements.yml)"
+          
+          # Backend configuration
+          backend-enabled: "$(yq '.backend.enabled // false' platform-requirements.yml)"
+          backend-framework: "$(yq '.backend.framework // "none"' platform-requirements.yml)"
+          backend-port: "$(yq '.backend.config.port // 5000' platform-requirements.yml)"
+          backend-database: "$(yq '.backend.database // "none"' platform-requirements.yml)"
+          backend-health-check: "$(yq '.backend.config.health_check // "/health"' platform-requirements.yml)"
+          backend-api-prefix: "$(yq '.backend.config.api_prefix // "/api"' platform-requirements.yml)"
+          
+          # Platform-managed resource allocation (not user-configurable)
+          # STAGING: frontend(1 replica, 100m/128Mi), backend(1 replica, 200m/256Mi)
+          # PRODUCTION: frontend(3 replicas, 500m/512Mi), backend(3 replicas, 1000m/1Gi)
+          frontend-replicas: "$([ "$ENV" = "production" ] && echo "3" || echo "1")"
+          frontend-cpu: "$([ "$ENV" = "production" ] && echo "500m" || echo "100m")"
+          frontend-memory: "$([ "$ENV" = "production" ] && echo "512Mi" || echo "128Mi")"
+          backend-replicas: "$([ "$ENV" = "production" ] && echo "3" || echo "1")"
+          backend-cpu: "$([ "$ENV" = "production" ] && echo "1000m" || echo "200m")"
+          backend-memory: "$([ "$ENV" = "production" ] && echo "1Gi" || echo "256Mi")"
+        EOF
+          
+          echo "Generated platform configuration:"
+          cat platform-config.yaml
+          
+          # Pass the config as output (base64 encoded to handle multiline)
+          echo "platform-config=$(cat platform-config.yaml | base64 -w 0)" >> $GITHUB_OUTPUT
+          
+        else
+          echo "No platform-requirements.yml found, using default configuration"
+          echo "platform-config=" >> $GITHUB_OUTPUT
+        fi
+
+  build-and-push:
+    name: Build and Push Docker Image
+    needs: [test, process-platform-requirements]
+    runs-on: ubuntu-latest
+    outputs:
+      short-sha: ${{ steps.vars.outputs.short-sha }}
+      image-tag: ${{ steps.vars.outputs.image-tag }}
+
+    steps:
+    - name: Checkout application code
+      uses: actions/checkout@v4
+
+    - name: Set up variables
+      id: vars
+      run: |
+        SHORT_SHA=${GITHUB_SHA::8}
+        echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+        echo "image-tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.docker_context }}
+        file: ${{ inputs.dockerfile_path }}
+        push: true
+        tags: |
+          ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short-sha }}
+          ${{ env.IMAGE_NAME }}:latest
+
+  update-gitops-config:
+    name: Update GitOps Configuration
+    needs: [build-and-push, process-platform-requirements]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout config repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.CONFIG_REPO }}
+        token: ${{ secrets.GITOPS_PAT }}
+        ref: ${{ env.TARGET_BRANCH }}
+
+    - name: Update platform configuration
+      run: |
+        APP_NAME="${{ inputs.app_name }}"
+        PLATFORM_CONFIG="${{ needs.process-platform-requirements.outputs.platform-config }}"
+        
+        # Create app directory if it doesn't exist
+        mkdir -p "apps/${APP_NAME}"
+        
+        if [ -n "$PLATFORM_CONFIG" ]; then
+          echo "Updating platform configuration based on platform-requirements.yml"
+          echo "$PLATFORM_CONFIG" | base64 -d > "apps/${APP_NAME}/platform-modules.yaml"
+          echo "Generated platform-modules.yaml:"
+          cat "apps/${APP_NAME}/platform-modules.yaml"
+        else
+          echo "No platform requirements provided, keeping existing configuration"
+        fi
+
+    - name: Update Helm values with new image tag
+      run: |
+        NEW_TAG="${{ needs.build-and-push.outputs.short-sha }}"
+        APP_NAME="${{ inputs.app_name }}"
+        
+        # Define possible file locations based on app name
+        POSSIBLE_FILES=(
+          "apps/${APP_NAME}/values-staging.yaml"
+          "apps/${APP_NAME}/values-prod.yaml"
+          "apps/${APP_NAME}/values.yaml"
+        )
+        
+        echo "Looking for configuration files for app: ${APP_NAME}"
+        
+        UPDATED_FILES=()
+        for file in "${POSSIBLE_FILES[@]}"; do
+          if [ -f "$file" ]; then
+            echo "Found and updating: $file"
+            
+            # Update the image repository
+            sed -i "s|repository: .*|repository: ${{ env.IMAGE_NAME }}|g" "$file"
+            # Update the image tag
+            sed -i "s|tag: .*|tag: \"${NEW_TAG}\"|g" "$file"
+            
+            UPDATED_FILES+=("$file")
+          fi
+        done
+        
+        if [ ${#UPDATED_FILES[@]} -eq 0 ]; then
+          echo "Error: No configuration files found for app '${APP_NAME}'"
+          echo "Searched for:"
+          for file in "${POSSIBLE_FILES[@]}"; do
+            echo "  - $file"
+          done
+          exit 1
+        fi
+        
+        echo "Updated files:"
+        for file in "${UPDATED_FILES[@]}"; do
+          echo "  - $file"
+        done
+        
+        echo "Changes made:"
+        git diff
+
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        if git diff --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+        
+        NEW_TAG="${{ needs.build-and-push.outputs.short-sha }}"
+        APP_NAME="${{ inputs.app_name }}"
+        
+        git add .
+        git commit -m "🚀 Update ${APP_NAME} image to ${{ env.IMAGE_NAME }}:${NEW_TAG}
+
+        Application: ${APP_NAME}
+        Image: ${{ env.IMAGE_NAME }}:${NEW_TAG}
+        Commit: ${GITHUB_SHA}
+        
+        Updated by: ${GITHUB_ACTOR}
+        Workflow: ${GITHUB_WORKFLOW}
+        Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+        
+        git push origin ${{ env.TARGET_BRANCH }}
+
+  security-scan:
+    name: Security Scan
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout application code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short-sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        scanners: 'vuln'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  notify-deployment:
+    name: Deployment Notification
+    needs: [build-and-push, update-gitops-config, security-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Deployment notification
+      run: |
+        APP_NAME="${{ inputs.app_name }}"
+        IMAGE_TAG="${{ needs.build-and-push.outputs.short-sha }}"
+        
+        if [ "${{ needs.update-gitops-config.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ]; then
+          echo "✅ Successfully completed GitOps deployment for ${APP_NAME}!"
+          echo "🐳 Image: ${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          echo "📦 GitOps config updated in ${CONFIG_REPO}"
+          echo "🔒 Security scan completed"
+          echo ""
+          echo "ArgoCD will automatically detect and deploy the changes."
+          echo "🌐 Monitor your application deployment in ArgoCD dashboard"
+        else
+          echo "❌ Deployment failed for ${APP_NAME}. Check logs for details:"
+          echo "  - GitOps Config: ${{ needs.update-gitops-config.result }}"
+          echo "  - Security Scan: ${{ needs.security-scan.result }}"
+          exit 1
+        fi
