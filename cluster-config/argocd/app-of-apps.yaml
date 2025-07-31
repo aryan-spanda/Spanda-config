@@ -6,26 +6,33 @@ metadata:
 spec:
   generators:
   - git:
-      repoURL: https://github.com/your-org/spandaai-config.git
+      # 1. CORRECTED: Use your actual repository URL
+      repoURL: https://github.com/aryan-spanda/Spanda-config.git
       revision: HEAD
       directories:
+      # This pattern finds all production application configurations
       - path: apps/*/overlays/production
   template:
     metadata:
-      name: '{{path[0]}}-prod'
+      # 2. IMPROVED: Using 'path.basename' is the modern, clearer syntax
+      name: '{{path.basename}}-prod'
       labels:
         app.kubernetes.io/managed-by: argocd-applicationset
         app.kubernetes.io/part-of: spandaai-platform
         app.kubernetes.io/environment: production
     spec:
+      # For a real platform, you would create a dedicated project
+      # instead of using 'default' to enforce stricter permissions.
       project: default
       source:
-        repoURL: https://github.com/your-org/spandaai-config.git
+        # CORRECTED: Use your actual repository URL
+        repoURL: https://github.com/aryan-spanda/Spanda-config.git
         targetRevision: HEAD
-        path: '{{path}}'
+        path: '{{path}}' # Uses the full path found by the generator
       destination:
         server: https://kubernetes.default.svc
-        namespace: '{{path[0]}}'
+        # IMPROVED: Using 'path.basename' to set the namespace
+        namespace: '{{path.basename}}'
       syncPolicy:
         automated:
           prune: true
