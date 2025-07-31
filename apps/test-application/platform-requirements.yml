@@ -1,0 +1,120 @@
+# Platform Module Requirements
+# This file specifies which bare-metal platform modules your application needs
+# Developers can modify this file to enable/disable platform features
+
+# Application Information
+app:
+  name: "test-application"
+  environment: "staging"  # staging, production
+  
+# Frontend Requirements
+frontend:
+  enabled: true
+  framework: "react"
+  
+  # Networking modules needed for frontend
+  modules:
+    external_load_balancer: true      # Public internet access
+    ssl_termination: true             # HTTPS support
+    cdn: false                        # Content delivery network
+    waf: false                        # Web application firewall
+    
+  # Frontend-specific configuration
+  config:
+    replicas: 2
+    port: 3000
+    domain: "app.example.com"         # Optional: custom domain
+
+# Backend Requirements  
+backend:
+  enabled: true
+  framework: "express"
+  database: "none"                    # none, postgresql, mongodb, redis
+  
+  # Networking modules needed for backend
+  modules:
+    internal_load_balancer: true      # Internal service communication
+    external_api_access: true         # External API endpoints
+    service_mesh: false               # Advanced networking
+    monitoring: true                  # Observability stack
+    
+  # Backend-specific configuration
+  config:
+    replicas: 2
+    port: 5000
+    health_check: "/health"
+    api_prefix: "/api/v1"
+
+# Shared Infrastructure Modules
+shared:
+  # Core platform modules (rarely changed)
+  modules:
+    vpc_networking: true              # Virtual private cloud
+    firewall: true                    # Security rules
+    logging: true                     # Centralized logging
+    metrics: true                     # Application metrics
+    secrets_management: true          # Secret store integration
+    
+  # Optional shared services
+  optional:
+    backup: false                     # Automated backups
+    disaster_recovery: false          # Multi-region setup
+    compliance_scanning: false        # Security compliance
+    cost_optimization: false          # Resource optimization
+
+# =====================================================================
+# ENVIRONMENT RESOURCE ALLOCATION (PLATFORM MANAGED - DO NOT EDIT)
+# =====================================================================
+# The following resource allocations are managed by the platform team
+# and cannot be modified by application developers. These are provided
+# for informational purposes only.
+
+# STAGING Environment Resources:
+# frontend:
+#   replicas: 1 (fixed)
+#   resources:
+#     cpu: "100m" (platform managed)
+#     memory: "128Mi" (platform managed)
+# backend:
+#   replicas: 1 (fixed)
+#   resources:
+#     cpu: "200m" (platform managed)
+#     memory: "256Mi" (platform managed)
+# modules:
+#   cdn: false (disabled in staging)
+#   waf: false (disabled in staging)
+#   backup: false (disabled in staging)
+#   disaster_recovery: false (disabled in staging)
+
+# PRODUCTION Environment Resources:
+# frontend:
+#   replicas: 3 (fixed)
+#   resources:
+#     cpu: "500m" (platform managed)
+#     memory: "512Mi" (platform managed)
+# backend:
+#   replicas: 3 (fixed)
+#   resources:
+#     cpu: "1000m" (platform managed)
+#     memory: "1Gi" (platform managed)
+# modules:
+#   waf: true (automatically enabled in production)
+#   backup: true (automatically enabled in production)
+#   monitoring: true (automatically enabled in production)
+#   compliance_scanning: true (automatically enabled in production)
+
+# =====================================================================
+# RESOURCE SCALING REQUESTS
+# =====================================================================
+# If your application requires different resource allocations than the
+# standard platform defaults shown above, please contact the platform
+# team with:
+# 1. Business justification for resource changes
+# 2. Performance testing data supporting the request
+# 3. Expected traffic/load patterns
+# 
+# Standard resource tiers available:
+# - Small:  frontend(100m/128Mi), backend(200m/256Mi) - 1 replica
+# - Medium: frontend(500m/512Mi), backend(1000m/1Gi) - 3 replicas  
+# - Large:  Contact platform team for custom sizing
+# =====================================================================

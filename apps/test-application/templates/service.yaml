@@ -4,10 +4,6 @@ metadata:
   name: {{ include "test-application.fullname" . }}
   labels:
     {{- include "test-application.labels" . | nindent 4 }}
-  {{- with .Values.service.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -15,8 +11,5 @@ spec:
       targetPort: {{ .Values.service.targetPort }}
       protocol: TCP
       name: http
-      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
-      nodePort: {{ .Values.service.nodePort }}
-      {{- end }}
   selector:
     {{- include "test-application.selectorLabels" . | nindent 4 }}

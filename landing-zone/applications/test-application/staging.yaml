@@ -5,23 +5,26 @@ metadata:
   namespace: argocd
   annotations:
     # ArgoCD Image Updater configuration for staging
-    argocd-image-updater.argoproj.io/image-list: test-app=aryanpola/sample-application
-    argocd-image-updater.argoproj.io/test-app.update-strategy: latest
-    argocd-image-updater.argoproj.io/test-app.allow-tags: regexp:^(latest|[a-f0-9]{8})$
-    argocd-image-updater.argoproj.io/test-app.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/test-app.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/image-list: test-application-app=ghcr.io/aryan-spanda/test-application
+    argocd-image-updater.argoproj.io/test-application-app.update-strategy: latest
+    argocd-image-updater.argoproj.io/test-application-app.allow-tags: regexp:^(latest|[a-f0-9]{8})$
+    argocd-image-updater.argoproj.io/test-application-app.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/test-application-app.helm.image-tag: image.tag
     argocd-image-updater.argoproj.io/write-back-method: git
     argocd-image-updater.argoproj.io/git-branch: main
     argocd.argoproj.io/sync-wave: "5"
   labels:
     app.kubernetes.io/name: test-application
     app.kubernetes.io/part-of: spandaai-platform
-    team: spanda-team
+    team: application-team
     environment: staging
+    app-type: frontend
+    app-type: backend
+    
 spec:
-  project: spandaai-platform
+  project: default
   source:
-    repoURL: https://github.com/aryan-spanda/Spanda-config.git
+    repoURL: https://github.com/aryan-spanda/config-repo.git
     targetRevision: main
     path: apps/test-application
     helm:

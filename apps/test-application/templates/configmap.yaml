@@ -1,4 +1,3 @@
-{{- if .Values.configMap.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,7 +5,9 @@ metadata:
   labels:
     {{- include "test-application.labels" . | nindent 4 }}
 data:
-  {{- range $key, $value := .Values.configMap.data }}
-  {{ $key }}: {{ $value | quote }}
-  {{- end }}
-{{- end }}
+
+  backend-framework: "express"
+  health-check-path: "/health"
+  frontend-framework: "react"
+  app-name: "test-application"
+  environment: "{{ .Values.app.environment | default \"production\" }}"

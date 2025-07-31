@@ -2,111 +2,37 @@
 replicaCount: 1
 
 image:
-  repository: aryanpola/sample-application
-  tag: "8b390c50"
+  repository: ghcr.io/aryan-spanda/test-application
+  tag: "latest"
   pullPolicy: Always
-
-imagePullSecrets:
-  - name: ghcr-secret
-
-nameOverride: ""
-fullnameOverride: ""
-
-serviceAccount:
-  create: true
-  automountServiceAccountToken: false
-  annotations: {}
-  name: ""
-
-podSecurityContext:
-  fsGroup: 2000
-  runAsNonRoot: true
-  runAsUser: 1000
-
-securityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: true
-  runAsNonRoot: true
-  runAsUser: 1000
-
-service:
-  type: ClusterIP
-  port: 80
-  targetPort: 3000
-  annotations: {}
-
-ingress:
-  enabled: true
-  className: nginx
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-  hosts:
-    - host: test-app-staging.spandaai.com
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
 
 resources:
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 200m
+    memory: 256Mi
   requests:
     cpu: 100m
     memory: 128Mi
 
+ingress:
+  hosts:
+    - host: test-application-staging.local
+      paths:
+        - path: /api(/|\$)(.*)
+          pathType: Prefix
+  tls:
+    - secretName: test-application-staging-tls
+      hosts:
+        - test-application-staging.local
+
+# Staging-specific settings
 autoscaling:
   enabled: false
 
-# Health check configuration
-healthCheck:
-  enabled: true
-  path: /health
-  initialDelaySeconds: 15
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 3
-
-# Readiness probe configuration
-readinessProbe:
-  enabled: true
-  path: /health
-  initialDelaySeconds: 5
-  periodSeconds: 5
-  timeoutSeconds: 3
-  failureThreshold: 3
-
-# Environment variables
+# Environment variables for staging
 env:
-  NODE_ENV: staging
-  LOG_LEVEL: debug
-  PORT: "3000"
-  METRICS_ENABLED: "true"
+  - name: NODE_ENV
+    value: "staging"
+  - name: REACT_APP_API_URL
+    value: "https://test-application-staging.local/api"
 
-# ConfigMap configuration
-configMap:
-  enabled: true
-  data:
-    database.url: "postgresql://staging-db:5432/testapp"
-    redis.url: "redis://redis-service:6379"
-    app.name: "test-application-staging"
-
-nodeSelector: {}
-tolerations: []
-affinity: {}
-
-# Volume mounts for writable directories
-volumeMounts:
-  - name: tmp
-    mountPath: /tmp
-  - name: var-cache
-    mountPath: /var/cache
-
-volumes:
-  - name: tmp
-    emptyDir: {}
-  - name: var-cache
-    emptyDir: {}
