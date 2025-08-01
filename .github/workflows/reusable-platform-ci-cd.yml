@@ -1,6 +1,6 @@
-# Reusable Platform CI/CD Workflow
-# This workflow is owned and maintained by the Platform Team
-# Application developers call this workflow with their specific parameters
+# Reusable Platform CI/CD Workflow - NO AUTOMATIC HELM CHART GENERATION
+# This workflow ONLY builds images and updates ArgoCD Application references
+# Helm charts are manually maintained in application repositories
 
 name: Reusable Platform CI/CD
 
@@ -19,7 +19,7 @@ on:
         description: 'Configuration repository name'
         required: false
         type: string
-        default: 'aryan-spanda/Spanda-config'
+        default: 'aryan-spanda/config-repo'
       target_branch:
         description: 'Target branch for deployment'
         required: false
@@ -88,120 +88,9 @@ jobs:
       run: npm test
       continue-on-error: false
 
-  process-platform-requirements:
-    name: Process Platform Requirements
-    needs: test
-    runs-on: ubuntu-latest
-    outputs:
-      platform-config: ${{ steps.generate-config.outputs.platform-config }}
-
-    steps:
-    - name: Checkout application code
-      uses: actions/checkout@v4
-
-    - name: Process platform requirements
-      id: generate-config
-      run: |
-        if [ -f "platform-requirements.yml" ]; then
-          echo "Found platform-requirements.yml, processing..."
-          
-          # Install yq for YAML processing
-          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
-          
-          # Extract environment (default to staging)
-          ENV=$(yq '.app.environment // "staging"' platform-requirements.yml)
-          echo "Target environment: $ENV"
-          
-          # Generate platform configuration based on requirements
-          cat > platform-config.yaml << EOF
-        apiVersion: v1
-        kind: ConfigMap
-        metadata:
-          name: platform-modules-config
-          labels:
-            app: ${{ inputs.app_name }}
-            component: platform-config
-            environment: $ENV
-        data:
-          # Core networking (always enabled for web apps)
-          net-vpc-baremetal: "$(yq '.shared.modules.vpc_networking // true' platform-requirements.yml)"
-          net-firewall-baremetal: "$(yq '.shared.modules.firewall // true' platform-requirements.yml)"
-          
-          # Frontend modules
-          net-lb-app-external-baremetal: "$(yq '.frontend.modules.external_load_balancer // false' platform-requirements.yml)"
-          ssl-termination: "$(yq '.frontend.modules.ssl_termination // false' platform-requirements.yml)"
-          cdn: "$(yq '.frontend.modules.cdn // false' platform-requirements.yml)"
-          waf: "$(yq '.frontend.modules.waf // false' platform-requirements.yml)"
-          
-          # Backend modules  
-          net-lb-app-internal-baremetal: "$(yq '.backend.modules.internal_load_balancer // false' platform-requirements.yml)"
-          external-api-access: "$(yq '.backend.modules.external_api_access // false' platform-requirements.yml)"
-          service-mesh: "$(yq '.backend.modules.service_mesh // false' platform-requirements.yml)"
-          
-          # Infrastructure modules
-          argocd: "enabled"  # Always enabled for GitOps
-          monitoring: "$(yq '.backend.modules.monitoring // true' platform-requirements.yml)"
-          logging: "$(yq '.shared.modules.logging // true' platform-requirements.yml)"
-          secrets-management: "$(yq '.shared.modules.secrets_management // true' platform-requirements.yml)"
-          
-          # Optional modules
-          backup: "$(yq '.shared.optional.backup // false' platform-requirements.yml)"
-          disaster-recovery: "$(yq '.shared.optional.disaster_recovery // false' platform-requirements.yml)"
-          compliance-scanning: "$(yq '.shared.optional.compliance_scanning // false' platform-requirements.yml)"
-        ---
-        apiVersion: v1
-        kind: ConfigMap
-        metadata:
-          name: platform-modules-config-overrides
-          labels:
-            app: ${{ inputs.app_name }}
-            component: platform-overrides
-            environment: $ENV
-        data:
-          # Application configuration
-          app-namespace: "${{ inputs.app_name }}-$ENV"
-          app-image: "${{ inputs.docker_image_name }}"
-          
-          # Frontend configuration
-          frontend-enabled: "$(yq '.frontend.enabled // false' platform-requirements.yml)"
-          frontend-framework: "$(yq '.frontend.framework // "none"' platform-requirements.yml)"
-          frontend-port: "$(yq '.frontend.config.port // 3000' platform-requirements.yml)"
-          frontend-domain: "$(yq '.frontend.config.domain // ""' platform-requirements.yml)"
-          
-          # Backend configuration
-          backend-enabled: "$(yq '.backend.enabled // false' platform-requirements.yml)"
-          backend-framework: "$(yq '.backend.framework // "none"' platform-requirements.yml)"
-          backend-port: "$(yq '.backend.config.port // 5000' platform-requirements.yml)"
-          backend-database: "$(yq '.backend.database // "none"' platform-requirements.yml)"
-          backend-health-check: "$(yq '.backend.config.health_check // "/health"' platform-requirements.yml)"
-          backend-api-prefix: "$(yq '.backend.config.api_prefix // "/api"' platform-requirements.yml)"
-          
-          # Platform-managed resource allocation (not user-configurable)
-          # STAGING: frontend(1 replica, 100m/128Mi), backend(1 replica, 200m/256Mi)
-          # PRODUCTION: frontend(3 replicas, 500m/512Mi), backend(3 replicas, 1000m/1Gi)
-          frontend-replicas: "$([ "$ENV" = "production" ] && echo "3" || echo "1")"
-          frontend-cpu: "$([ "$ENV" = "production" ] && echo "500m" || echo "100m")"
-          frontend-memory: "$([ "$ENV" = "production" ] && echo "512Mi" || echo "128Mi")"
-          backend-replicas: "$([ "$ENV" = "production" ] && echo "3" || echo "1")"
-          backend-cpu: "$([ "$ENV" = "production" ] && echo "1000m" || echo "200m")"
-          backend-memory: "$([ "$ENV" = "production" ] && echo "1Gi" || echo "256Mi")"
-        EOF
-          
-          echo "Generated platform configuration:"
-          cat platform-config.yaml
-          
-          # Pass the config as output (base64 encoded to handle multiline)
-          echo "platform-config=$(cat platform-config.yaml | base64 -w 0)" >> $GITHUB_OUTPUT
-          
-        else
-          echo "No platform-requirements.yml found, using default configuration"
-          echo "platform-config=" >> $GITHUB_OUTPUT
-        fi
-
   build-and-push:
     name: Build and Push Docker Image
-    needs: [test, process-platform-requirements]
+    needs: test
     runs-on: ubuntu-latest
     outputs:
       short-sha: ${{ steps.vars.outputs.short-sha }}
@@ -236,7 +125,7 @@ jobs:
 
   update-gitops-config:
     name: Update GitOps Configuration
-    needs: [build-and-push, process-platform-requirements]
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
     - name: Checkout config repository
@@ -246,75 +135,39 @@ jobs:
         token: ${{ secrets.GITOPS_PAT }}
         ref: ${{ env.TARGET_BRANCH }}
 
-    - name: Update platform configuration
-      run: |
-        APP_NAME="${{ inputs.app_name }}"
-        PLATFORM_CONFIG="${{ needs.process-platform-requirements.outputs.platform-config }}"
-        
-        # Create app directory if it doesn't exist
-        mkdir -p "apps/${APP_NAME}"
-        
-        if [ -n "$PLATFORM_CONFIG" ]; then
-          echo "Updating platform configuration based on platform-requirements.yml"
-          echo "$PLATFORM_CONFIG" | base64 -d > "apps/${APP_NAME}/platform-modules.yaml"
-          echo "Generated platform-modules.yaml:"
-          cat "apps/${APP_NAME}/platform-modules.yaml"
-        else
-          echo "No platform requirements provided, keeping existing configuration"
-        fi
-
-    - name: Update Helm values with new image tag
+    - name: Update ArgoCD Application image references
       run: |
         NEW_TAG="${{ needs.build-and-push.outputs.short-sha }}"
         APP_NAME="${{ inputs.app_name }}"
         
-        # Define possible file locations based on app name
-        POSSIBLE_FILES=(
-          "apps/${APP_NAME}/values-staging.yaml"
-          "apps/${APP_NAME}/values-prod.yaml"
-          "apps/${APP_NAME}/values.yaml"
-        )
+        echo "Updating ArgoCD Applications for app: ${APP_NAME}"
+        echo "New image tag: ${NEW_TAG}"
+        echo "Image: ${{ env.IMAGE_NAME }}:${NEW_TAG}"
         
-        echo "Looking for configuration files for app: ${APP_NAME}"
-        
-        UPDATED_FILES=()
-        for file in "${POSSIBLE_FILES[@]}"; do
+        # Update ArgoCD Application manifests that reference the image
+        find applications/${APP_NAME}/argocd/ -name "*.yaml" -type f 2>/dev/null | while read file; do
           if [ -f "$file" ]; then
-            echo "Found and updating: $file"
-            
-            # Update the image repository
-            sed -i "s|repository: .*|repository: ${{ env.IMAGE_NAME }}|g" "$file"
-            # Update the image tag
-            sed -i "s|tag: .*|tag: \"${NEW_TAG}\"|g" "$file"
-            
-            UPDATED_FILES+=("$file")
+            echo "Found ArgoCD Application: $file"
+            # Update git ref to use the new commit if needed (optional)
+            if grep -q "targetRevision:" "$file"; then
+              echo "  - Application points to app repository (no changes needed)"
+            fi
           fi
         done
         
-        if [ ${#UPDATED_FILES[@]} -eq 0 ]; then
-          echo "Error: No configuration files found for app '${APP_NAME}'"
-          echo "Searched for:"
-          for file in "${POSSIBLE_FILES[@]}"; do
-            echo "  - $file"
-          done
-          exit 1
-        fi
-        
-        echo "Updated files:"
-        for file in "${UPDATED_FILES[@]}"; do
-          echo "  - $file"
-        done
-        
-        echo "Changes made:"
-        git diff
+        echo ""
+        echo "✅ ArgoCD Applications point to application repository charts"
+        echo "✅ Application repository manages its own Helm values"
+        echo "✅ Image updates happen in the application repository via separate workflow"
 
-    - name: Commit and push changes
+    - name: Commit changes (if any)
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         
         if git diff --quiet; then
-          echo "No changes to commit"
+          echo "✅ No changes to commit - ArgoCD applications are up to date"
+          echo "📝 Note: Image updates are managed in the application repository"
           exit 0
         fi
         
@@ -322,11 +175,14 @@ jobs:
         APP_NAME="${{ inputs.app_name }}"
         
         git add .
-        git commit -m "🚀 Update ${APP_NAME} image to ${{ env.IMAGE_NAME }}:${NEW_TAG}
+        git commit -m "� Update ${APP_NAME} config repository metadata
 
         Application: ${APP_NAME}
-        Image: ${{ env.IMAGE_NAME }}:${NEW_TAG}
+        Image Built: ${{ env.IMAGE_NAME }}:${NEW_TAG}
         Commit: ${GITHUB_SHA}
+        
+        Note: Helm values are managed in application repository
+        ArgoCD will sync from: https://github.com/aryan-spanda/${APP_NAME}.git
         
         Updated by: ${GITHUB_ACTOR}
         Workflow: ${GITHUB_WORKFLOW}
@@ -367,15 +223,22 @@ jobs:
         IMAGE_TAG="${{ needs.build-and-push.outputs.short-sha }}"
         
         if [ "${{ needs.update-gitops-config.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ]; then
-          echo "✅ Successfully completed GitOps deployment for ${APP_NAME}!"
-          echo "🐳 Image: ${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
-          echo "📦 GitOps config updated in ${CONFIG_REPO}"
-          echo "🔒 Security scan completed"
+          echo "✅ Successfully completed CI/CD pipeline for ${APP_NAME}!"
           echo ""
-          echo "ArgoCD will automatically detect and deploy the changes."
-          echo "🌐 Monitor your application deployment in ArgoCD dashboard"
+          echo "🐳 Image Built: ${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          echo "� Security scan: Passed"
+          echo "📋 Config repo: Updated (if needed)"
+          echo ""
+          echo "📝 Next Steps:"
+          echo "  1. Update Helm values in your application repository"
+          echo "  2. ArgoCD will automatically sync from app repository"
+          echo "  3. Monitor deployment in ArgoCD dashboard"
+          echo ""
+          echo "🎯 GitOps Flow:"
+          echo "  App Repo (Helm Charts) → ArgoCD → Kubernetes"
         else
-          echo "❌ Deployment failed for ${APP_NAME}. Check logs for details:"
+          echo "❌ Pipeline failed for ${APP_NAME}. Check logs for details:"
+          echo "  - Build & Push: ${{ needs.build-and-push.result }}"
           echo "  - GitOps Config: ${{ needs.update-gitops-config.result }}"
           echo "  - Security Scan: ${{ needs.security-scan.result }}"
           exit 1

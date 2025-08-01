@@ -1,0 +1,115 @@
+# Application Repository CI/CD Workflow Template
+# This file should be placed in: spanda-test-app/.github/workflows/ci-cd.yml
+
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Step 1: Update Helm values in THIS repository (app repo)
+  update-helm-values:
+    name: Update Helm Values
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'  # Only on push, not PR
+    outputs:
+      image-tag: ${{ steps.vars.outputs.image-tag }}
+    steps:
+    - name: Checkout app repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set variables
+      id: vars
+      run: |
+        SHORT_SHA=${GITHUB_SHA::8}
+        echo "image-tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+    - name: Update Helm values with new image tag
+      run: |
+        NEW_TAG="${{ steps.vars.outputs.image-tag }}"
+        
+        echo "Updating Helm values with image tag: ${NEW_TAG}"
+        
+        # Update development values (always updated)
+        if [ -f "charts/test-application/values-dev.yaml" ]; then
+          sed -i "s|tag: \".*\"|tag: \"${NEW_TAG}\"|g" charts/test-application/values-dev.yaml
+          echo "✅ Updated values-dev.yaml"
+        fi
+        
+        # Update staging values (always updated)
+        if [ -f "charts/test-application/values-staging.yaml" ]; then
+          sed -i "s|tag: \".*\"|tag: \"${NEW_TAG}\"|g" charts/test-application/values-staging.yaml
+          echo "✅ Updated values-staging.yaml"
+        fi
+        
+        # Update production values (only on main branch)
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          if [ -f "charts/test-application/values-prod.yaml" ]; then
+            sed -i "s|tag: \".*\"|tag: \"${NEW_TAG}\"|g" charts/test-application/values-prod.yaml
+            echo "✅ Updated values-prod.yaml (main branch)"
+          fi
+        else
+          echo "⏭️  Skipped values-prod.yaml (not main branch)"
+        fi
+
+    - name: Commit updated Helm values
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        if git diff --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+        
+        git add charts/test-application/values-*.yaml
+        git commit -m "🚀 Update Helm values to use image tag ${{ steps.vars.outputs.image-tag }}
+
+        Updated by: CI/CD Pipeline
+        Commit: ${GITHUB_SHA}
+        Branch: ${{ github.ref_name }}"
+        
+        git push
+
+  # Step 2: Call platform CI/CD to build image and update config repo
+  platform-ci-cd:
+    name: Platform CI/CD
+    needs: update-helm-values
+    if: always() && github.event_name == 'push'
+    uses: aryan-spanda/config-repo/.github/workflows/reusable-platform-ci-cd.yml@main
+    with:
+      app_name: test-application
+      docker_image_name: aryan-spanda/test-application
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
+
+  # Optional: Validate Helm charts
+  validate-helm:
+    name: Validate Helm Charts
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Validate Helm charts
+      run: |
+        helm lint charts/test-application/
+        
+        # Template the charts to check for syntax errors
+        helm template test-app charts/test-application/ --values charts/test-application/values-dev.yaml > /dev/null
+        helm template test-app charts/test-application/ --values charts/test-application/values-staging.yaml > /dev/null
+        helm template test-app charts/test-application/ --values charts/test-application/values-prod.yaml > /dev/null
+        
+        echo "✅ All Helm charts validated successfully"
