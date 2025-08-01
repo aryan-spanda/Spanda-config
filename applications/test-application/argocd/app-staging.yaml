@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: test-application-staging
+  namespace: argocd
+  annotations:
+    # ArgoCD Image Updater configuration for staging
+    argocd-image-updater.argoproj.io/image-list: test-application-app=ghcr.io/aryan-spanda/test-application
+    argocd-image-updater.argoproj.io/test-application-app.update-strategy: latest
+    argocd-image-updater.argoproj.io/test-application-app.allow-tags: regexp:^(latest|main-.+|[a-f0-9]{8})$
+    argocd-image-updater.argoproj.io/test-application-app.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/test-application-app.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd.argoproj.io/sync-wave: "5"
+  labels:
+    app.kubernetes.io/name: test-application
+    app.kubernetes.io/part-of: spandaai-platform
+    team: application-team
+    environment: staging
+    app-type: frontend
+    app-type: backend
+spec:
+  project: spanda-applications
+  source:
+    repoURL: https://github.com/aryan-spanda/spanda-test-app.git
+    targetRevision: main
+    path: charts/test-application
+    helm:
+      valueFiles:
+        - values-staging.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  revisionHistoryLimit: 5

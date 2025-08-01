@@ -5,40 +5,35 @@ This repository contains all deployment configurations for the Spanda AI Platfor
 ## 🎯 Repository Purpose
 
 This config repository follows the GitOps pattern where:
-- **Source code** lives in application repositories (e.g., Test-Application)
-- **Deployment configurations** live here in the config repository
+- **Source code and Helm charts** live in application repositories (e.g., spanda-test-app)
+- **Deployment configurations (ArgoCD Applications)** live here in the config repository
 - **ArgoCD** monitors this repository and automatically deploys changes to Kubernetes
 
 ## 📁 Repository Structure
 
 ```
 config-repo/
-├── 🚀 landing-zone/                   # ArgoCD Application definitions
-│   └── applications/
-│       ├── test-application-prod.yaml      # Production ArgoCD app
-│       ├── test-application-staging.yaml   # Staging ArgoCD app
-│       └── README.md
-│
-├── 📱 apps/                          # Application-specific configurations
+├── 🚀 applications/                   # ArgoCD Application definitions
 │   └── test-application/
-│       ├── Chart.yaml                # Helm chart metadata
-│       ├── values-prod.yaml          # Production values
-│       ├── values-staging.yaml       # Staging values
-│       └── templates/                # Kubernetes templates
-│           ├── _helpers.tpl
-│           ├── deployment.yaml
-│           ├── service.yaml
-│           ├── ingress.yaml
-│           ├── serviceaccount.yaml
-│           ├── configmap.yaml
-│           └── hpa.yaml
+│       └── argocd/
+│           ├── app-dev.yaml          # Development environment
+│           ├── app-staging.yaml      # Staging environment
+│           └── app-prod.yaml         # Production environment
 │
-├── 🏗️ infrastructure/               # Infrastructure as Code (Future)
-│   ├── namespaces/
-│   ├── rbac/
-│   └── monitoring/
+├── 🏗️ infrastructure/                # Cluster-wide infrastructure
+│   └── namespaces/
+│       └── app-namespaces.yaml       # Environment namespaces
 │
-└── 📚 docs/                         # Documentation
+├── ⚙️ argocd/                        # ArgoCD configuration
+│   └── projects/
+│       └── spanda-applications.yaml  # ArgoCD project with RBAC
+│
+├── 🔄 cluster-config/                # Bootstrap configuration
+│   └── argocd/
+│       └── app-of-apps.yaml         # App-of-Apps pattern
+│
+└── 🛠️ scripts/                      # Onboarding automation
+    ├── onboard-application.sh        # Application onboarding
     └── README.md
 ```
 
@@ -46,8 +41,10 @@ config-repo/
 
 ### How Automatic Deployments Work
 
-1. **Code Push**: Developer pushes code to Test-Application repository
+1. **Code Push**: Developer pushes code to application repository (e.g., spanda-test-app)
 2. **CI/CD Pipeline**: GitHub Actions runs tests and builds Docker image
+3. **Image Update**: ArgoCD Image Updater automatically updates Helm values
+4. **Deployment**: ArgoCD syncs changes to Kubernetes clusters
 3. **Image Push**: New image pushed to GitHub Container Registry (GHCR)
 4. **Config Update**: GitHub Actions automatically updates image tags in this repository
 5. **ArgoCD Sync**: ArgoCD detects changes and deploys to Kubernetes cluster

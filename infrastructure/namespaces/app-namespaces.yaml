@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: development
+  labels:
+    name: development
+    environment: dev
+    app.kubernetes.io/part-of: spandaai-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    name: staging
+    environment: staging
+    app.kubernetes.io/part-of: spandaai-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    name: production
+    environment: prod
+    app.kubernetes.io/part-of: spandaai-platform
+---
+# Legacy namespaces - for backward compatibility
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-application
+  labels:
+    name: test-application
+    environment: prod
+    app.kubernetes.io/part-of: spandaai-platform
+    legacy: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-application-staging
+  labels:
+    name: test-application-staging
+    environment: staging
+    app.kubernetes.io/part-of: spandaai-platform
+    legacy: "true"

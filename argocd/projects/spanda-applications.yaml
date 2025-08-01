@@ -1,0 +1,40 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: spanda-applications
+  namespace: argocd
+spec:
+  description: Project for Spanda applications
+  sourceRepos:
+  - 'https://github.com/aryan-spanda/*'
+  destinations:
+  - namespace: 'development'
+    server: https://kubernetes.default.svc
+  - namespace: 'staging'
+    server: https://kubernetes.default.svc
+  - namespace: 'production'
+    server: https://kubernetes.default.svc
+  - namespace: 'test-application'
+    server: https://kubernetes.default.svc
+  - namespace: 'test-application-staging'
+    server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  namespaceResourceWhitelist:
+  - group: ''
+    kind: Service
+  - group: ''
+    kind: ConfigMap
+  - group: ''
+    kind: Secret
+  - group: apps
+    kind: Deployment
+  - group: networking.k8s.io
+    kind: Ingress
+  - group: autoscaling
+    kind: HorizontalPodAutoscaler
+  - group: ''
+    kind: ServiceAccount
+  - group: ''
+    kind: PersistentVolumeClaim
