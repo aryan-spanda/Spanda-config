@@ -3,10 +3,17 @@ kind: AppProject
 metadata:
   name: spanda-applications
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: spanda-applications
+    app.kubernetes.io/managed-by: platform-team
 spec:
-  description: Project for Spanda applications
+  description: Project for all Spanda Platform applications - supports client repositories
+  
+  # Allow applications from ANY repository (client-provided repos)
   sourceRepos:
-  - 'https://github.com/aryan-spanda/*'
+  - '*'  # Clients can deploy from their own repositories
+  
+  # Explicitly define target environments and allow custom namespaces
   destinations:
   - namespace: 'development'
     server: https://kubernetes.default.svc
@@ -14,27 +21,52 @@ spec:
     server: https://kubernetes.default.svc
   - namespace: 'production'
     server: https://kubernetes.default.svc
-  - namespace: 'test-application'
+  - namespace: '*'  # Allow dynamic namespace creation with proper controls
     server: https://kubernetes.default.svc
-  - namespace: 'test-application-staging'
-    server: https://kubernetes.default.svc
+  
+  # Cluster-level resources (minimal permissions)
   clusterResourceWhitelist:
   - group: ''
     kind: Namespace
+  
+  # Application-level resources (comprehensive but controlled)
   namespaceResourceWhitelist:
+  # Core application resources
   - group: ''
     kind: Service
   - group: ''
     kind: ConfigMap
   - group: ''
     kind: Secret
-  - group: apps
-    kind: Deployment
-  - group: networking.k8s.io
-    kind: Ingress
-  - group: autoscaling
-    kind: HorizontalPodAutoscaler
   - group: ''
     kind: ServiceAccount
   - group: ''
     kind: PersistentVolumeClaim
+  
+  # Workload resources
+  - group: apps
+    kind: Deployment
+  - group: apps
+    kind: ReplicaSet
+  - group: apps
+    kind: StatefulSet
+  
+  # Networking resources
+  - group: networking.k8s.io
+    kind: Ingress
+  - group: networking.k8s.io
+    kind: NetworkPolicy
+  
+  # Scaling resources
+  - group: autoscaling
+    kind: HorizontalPodAutoscaler
+  
+  # Monitoring resources (if using ServiceMonitor)
+  - group: monitoring.coreos.com
+    kind: ServiceMonitor
+  
+  # Role-based access (limited)
+  - group: rbac.authorization.k8s.io
+    kind: Role
+  - group: rbac.authorization.k8s.io
+    kind: RoleBinding
