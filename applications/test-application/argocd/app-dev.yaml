@@ -5,12 +5,22 @@ metadata:
   namespace: argocd
   labels:
     app.kubernetes.io/name: test-application
+    app.kubernetes.io/part-of: spandaai-platform
+    team: development-team
     environment: dev
-    app-type: auto-detected
+    app-type: fullstack
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-04T06:22:37Z"
+    app.spanda.ai/generated-at: "2025-08-04T06:30:34Z"
+    # ArgoCD Image Updater configuration
+    argocd-image-updater.argoproj.io/image-list: test-application-app=ghcr.io/aryan-spanda/test-application
+    argocd-image-updater.argoproj.io/test-application-app.update-strategy: semver
+    argocd-image-updater.argoproj.io/test-application-app.allow-tags: regexp:^v[0-9]+\.[0-9]+\.[0-9]+$
+    argocd-image-updater.argoproj.io/test-application-app.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/test-application-app.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
 spec:
   project: spanda-applications
   source:
@@ -44,3 +54,7 @@ spec:
       value: 'deploy/helm'
     - name: 'Environment'
       value: 'dev'
+    - name: 'Team'
+      value: 'development-team'
+    - name: 'Application Type'
+      value: 'fullstack'
