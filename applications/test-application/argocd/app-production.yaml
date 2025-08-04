@@ -1,10 +1,4 @@
-apiVersion: argoproj.    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/git-branch: testing
-spec:
-  project: spanda-applications
-  source:
-    repoURL: https://github.com/aryan-spanda/Test-Application.git
-    targetRevision: testingpha1
+apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: test-application-production
