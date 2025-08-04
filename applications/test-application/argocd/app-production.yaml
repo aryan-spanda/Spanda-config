@@ -12,15 +12,17 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-04T06:30:34Z"
+    app.spanda.ai/generated-at: "2025-08-04T13:29:03Z"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: test-application-app=ghcr.io/aryan-spanda/test-application
     argocd-image-updater.argoproj.io/test-application-app.update-strategy: latest
-    argocd-image-updater.argoproj.io/test-application-app.allow-tags: regexp:^main-[a-f0-9]{7}$|^latest$
+    argocd-image-updater.argoproj.io/test-application-app.allow-tags: regexp:^testing-[a-f0-9]{7}$|^latest$
     argocd-image-updater.argoproj.io/test-application-app.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/test-application-app.helm.image-tag: image.tag
     argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
     argocd-image-updater.argoproj.io/git-branch: testing
+    argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Spanda-config.git
 spec:
   project: spanda-applications
   source:

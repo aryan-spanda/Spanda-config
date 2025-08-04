@@ -8,7 +8,6 @@ applications/test-application/
 ├── README.md           # This file
 └── argocd/            # ArgoCD application manifests
     ├── app-dev.yaml
-    ├── app-prod.yaml
     ├── app-production.yaml
     ├── app-staging.yaml
 ```

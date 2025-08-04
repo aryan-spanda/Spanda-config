@@ -134,17 +134,19 @@ metadata:
     app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: $APP_NAME-app=ghcr.io/aryan-spanda/$APP_NAME
-    argocd-image-updater.argoproj.io/$APP_NAME-app.update-strategy: semver
-    argocd-image-updater.argoproj.io/$APP_NAME-app.allow-tags: regexp:^v[0-9]+\\.[0-9]+\\.[0-9]+$
+    argocd-image-updater.argoproj.io/$APP_NAME-app.update-strategy: latest
+    argocd-image-updater.argoproj.io/$APP_NAME-app.allow-tags: regexp:^testing-[a-f0-9]{7}$|^latest$
     argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-tag: image.tag
     argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+    argocd-image-updater.argoproj.io/git-branch: testing
+    argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Spanda-config.git
 spec:
   project: spanda-applications
   source:
     repoURL: $REPO_URL
-    targetRevision: main
+    targetRevision: testing
     path: $CHART_PATH
     helm:
       valueFiles:
