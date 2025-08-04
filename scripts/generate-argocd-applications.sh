@@ -139,9 +139,8 @@ metadata:
     argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-tag: image.tag
     argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/write-back-target: kustomization
     argocd-image-updater.argoproj.io/git-branch: testing
-    argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Spanda-config.git
+    argocd-image-updater.argoproj.io/git-repository: $REPO_URL
 spec:
   project: spanda-applications
   source:
