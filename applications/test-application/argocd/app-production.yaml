@@ -1,11 +1,11 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: test-application-staging
+  name: test-application-production
   namespace: argocd
   labels:
     app.kubernetes.io/name: test-application
-    environment: staging
+    environment: production
     app-type: auto-detected
   annotations:
     app.spanda.ai/generated: "true"
@@ -19,14 +19,11 @@ spec:
     path: deploy/helm
     helm:
       valueFiles:
-        - values-staging.yaml
+        - values-production.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: staging
+    namespace: production
   syncPolicy:
-    automated:
-      selfHeal: true
-      prune: true
     syncOptions:
       - CreateNamespace=true
     retry:
@@ -43,4 +40,4 @@ spec:
     - name: 'Chart Path'
       value: 'deploy/helm'
     - name: 'Environment'
-      value: 'staging'
+      value: 'production'
