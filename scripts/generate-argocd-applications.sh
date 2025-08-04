@@ -143,8 +143,8 @@ metadata:
     app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: $APP_NAME-app=$IMAGE_REFERENCE
-    argocd-image-updater.argoproj.io/$APP_NAME-app.update-strategy: latest
-    argocd-image-updater.argoproj.io/$APP_NAME-app.allow-tags: regexp:^testing-[a-f0-9]{7}$|^latest$
+    argocd-image-updater.argoproj.io/$APP_NAME-app.update-strategy: digest
+    argocd-image-updater.argoproj.io/$APP_NAME-app.allow-tags: regexp:^testing-[a-f0-9]{7}$
     argocd-image-updater.argoproj.io/write-back-method: git
     argocd-image-updater.argoproj.io/write-back-target: .
     argocd-image-updater.argoproj.io/git-branch: testing
@@ -164,7 +164,7 @@ spec:
         - name: image.repository
           value: $IMAGE_REFERENCE
         - name: image.tag
-          value: latest
+          value: testing-placeholder
   destination:
     server: https://kubernetes.default.svc
     namespace: $namespace
