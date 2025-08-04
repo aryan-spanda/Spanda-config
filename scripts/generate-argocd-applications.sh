@@ -62,6 +62,14 @@ generate_argocd_for_repo() {
     REPO_URL=$(yq eval '.app.repoURL' "$repo_path/platform-requirements.yml")
     CHART_PATH=$(yq eval '.app.chartPath' "$repo_path/platform-requirements.yml")
     
+    # Extract container registry details
+    CONTAINER_REGISTRY=$(yq eval '.container.registry // "ghcr.io"' "$repo_path/platform-requirements.yml")
+    CONTAINER_ORG=$(yq eval '.container.organization // "aryan-spanda"' "$repo_path/platform-requirements.yml")
+    CONTAINER_IMAGE=$(yq eval '.container.image // .app.name' "$repo_path/platform-requirements.yml")
+    
+    # Build full image reference
+    IMAGE_REFERENCE="$CONTAINER_REGISTRY/$CONTAINER_ORG/$CONTAINER_IMAGE"
+    
     if [[ "$APP_NAME" == "null" || -z "$APP_NAME" ]]; then
         echo "❌ Error: app.name is required in platform-requirements.yml"
         return 1
@@ -69,6 +77,7 @@ generate_argocd_for_repo() {
     
     echo "  📦 App Name: $APP_NAME"
     echo "  📂 Chart Path: $CHART_PATH"
+    echo "  🐳 Container Image: $IMAGE_REFERENCE"
     
     # Create application directory
     APP_DIR="$APPLICATIONS_DIR/$APP_NAME/argocd"
@@ -133,14 +142,15 @@ metadata:
     app.spanda.ai/generator: "platform-automation"
     app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: $APP_NAME-app=ghcr.io/aryan-spanda/$APP_NAME
+    argocd-image-updater.argoproj.io/image-list: $APP_NAME-app=$IMAGE_REFERENCE
     argocd-image-updater.argoproj.io/$APP_NAME-app.update-strategy: latest
     argocd-image-updater.argoproj.io/$APP_NAME-app.allow-tags: regexp:^testing-[a-f0-9]{7}$|^latest$
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/write-back-target: .
+    argocd-image-updater.argoproj.io/git-branch: testing
+    argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Spanda-config.git
     argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-tag: image.tag
-    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/git-branch: testing
-    argocd-image-updater.argoproj.io/git-repository: $REPO_URL
 spec:
   project: spanda-applications
   source:
@@ -150,6 +160,11 @@ spec:
     helm:
       valueFiles:
         - values-$env.yaml
+      parameters:
+        - name: image.repository
+          value: $IMAGE_REFERENCE
+        - name: image.tag
+          value: latest
   destination:
     server: https://kubernetes.default.svc
     namespace: $namespace
