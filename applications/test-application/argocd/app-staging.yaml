@@ -10,7 +10,7 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-04T06:20:28Z"
+    app.spanda.ai/generated-at: "2025-08-04T06:22:37Z"
 spec:
   project: spanda-applications
   source:
