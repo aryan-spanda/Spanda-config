@@ -1,0 +1,11 @@
+# Local application repositories (managed by sync script)
+local-app-repos/
+
+# Other common ignores
+*.log
+.DS_Store
+Thumbs.db
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl

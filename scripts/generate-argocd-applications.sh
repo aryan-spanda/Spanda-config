@@ -6,7 +6,8 @@
 # This script automatically generates ArgoCD application YAML files
 # by reading platform-requirements.yml from application repositories.
 #
-# Usage: ./generate-argocd-applications.sh [repo-url] [repo-url] ...
+# Usage: ./generate-argocd-applications.sh [repo-path] [repo-path] ...
+# Note: Now accepts local paths instead of URLs
 # =====================================================================
 
 set -e
@@ -28,40 +29,41 @@ if ! command -v yq &> /dev/null; then
 fi
 
 # Configuration
-CONFIG_REPO_ROOT="$(dirname "$(realpath "$0")")/.."
+CONFIG_REPO_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
 APPLICATIONS_DIR="$CONFIG_REPO_ROOT/applications"
 
-# Function to generate ArgoCD applications for a single repository
+# Function to generate ArgoCD applications for a local repository
 generate_argocd_for_repo() {
-    local repo_url="$1"
-    local temp_dir=$(mktemp -d)
+    local repo_path="$1"
     
-    echo "📥 Processing repository: $repo_url"
+    # Convert to absolute path if relative
+    if [[ ! "$repo_path" = /* ]]; then
+        repo_path="$(realpath "$repo_path")"
+    fi
     
-    # Clone the repository
-    if ! git clone "$repo_url" "$temp_dir" --depth 1 --quiet 2>/dev/null; then
-        echo "❌ Failed to clone $repo_url"
-        rm -rf "$temp_dir"
+    echo "📥 Processing local repository: $repo_path"
+    
+    # Check if directory exists
+    if [[ ! -d "$repo_path" ]]; then
+        echo "❌ Directory not found: $repo_path"
         return 1
     fi
     
     # Check if platform-requirements.yml exists
-    if [[ ! -f "$temp_dir/platform-requirements.yml" ]]; then
-        echo "⏭️  No platform-requirements.yml found in $repo_url"
-        rm -rf "$temp_dir"
+    if [[ ! -f "$repo_path/platform-requirements.yml" ]]; then
+        echo "⏭️  No platform-requirements.yml found in $repo_path"
         return 0
     fi
     
     echo "✅ Found platform-requirements.yml"
     
     # Extract application details
-    APP_NAME=$(yq eval '.app.name' "$temp_dir/platform-requirements.yml")
-    REPO_URL=$(yq eval '.app.repoURL' "$temp_dir/platform-requirements.yml")
-    CHART_PATH=$(yq eval '.app.chartPath' "$temp_dir/platform-requirements.yml")
+    APP_NAME=$(yq eval '.app.name' "$repo_path/platform-requirements.yml")
+    REPO_URL=$(yq eval '.app.repoURL' "$repo_path/platform-requirements.yml")
+    CHART_PATH=$(yq eval '.app.chartPath' "$repo_path/platform-requirements.yml")
     
     if [[ "$APP_NAME" == "null" || -z "$APP_NAME" ]]; then
         echo "❌ Error: app.name is required in platform-requirements.yml"
-        rm -rf "$temp_dir"
         return 1
     fi
     
@@ -73,11 +75,10 @@ generate_argocd_for_repo() {
     mkdir -p "$APP_DIR"
     
     # Read environments array
-    ENVIRONMENTS=$(yq eval '.environments[]' "$temp_dir/platform-requirements.yml")
+    ENVIRONMENTS=$(yq eval '.environments[]' "$repo_path/platform-requirements.yml")
     
     if [[ -z "$ENVIRONMENTS" ]]; then
         echo "❌ Error: No environments specified in platform-requirements.yml"
-        rm -rf "$temp_dir"
         return 1
     fi
     
@@ -202,30 +203,39 @@ argocd app sync $APP_NAME-dev
 ## 🔄 Auto-Generated
 
 These files were automatically generated from \`platform-requirements.yml\`.
-To update, modify the platform requirements in the source repository and re-run:
+To update, run the sync and generation process:
 
 \`\`\`bash
-./scripts/generate-argocd-applications.sh $REPO_URL
+cd config-repo
+./scripts/sync-app-repos.sh
+./scripts/generate-argocd-applications.sh ./local-app-repos/$APP_NAME
 \`\`\`
 EOF
     
     echo "  📝 Generated README: $APP_DIR/../README.md"
     echo "  ✅ ArgoCD applications generated for $APP_NAME"
-    
-    rm -rf "$temp_dir"
 }
 
 # Main execution
 if [[ $# -eq 0 ]]; then
-    echo "📋 No repositories specified. Using default application repositories..."
+    echo "📋 No local paths specified. Processing all repositories in local-app-repos/..."
     
-    # Default repositories to scan
-    REPOS=(
-        "https://github.com/aryan-spanda/Test-Application.git"
-        # Add more repositories here as they adopt platform-requirements.yml
-    )
+    LOCAL_REPOS_DIR="$CONFIG_REPO_ROOT/local-app-repos"
+    if [[ ! -d "$LOCAL_REPOS_DIR" ]]; then
+        echo "❌ Error: $LOCAL_REPOS_DIR not found."
+        echo "   Please run ./scripts/sync-app-repos.sh first to sync repositories."
+        exit 1
+    fi
+    
+    # Process all directories in local-app-repos
+    REPOS=()
+    for repo_dir in "$LOCAL_REPOS_DIR"/*; do
+        if [[ -d "$repo_dir" ]]; then
+            REPOS+=("$repo_dir")
+        fi
+    done
 else
-    # Use provided repositories
+    # Use provided local paths
     REPOS=("$@")
 fi
 
@@ -249,5 +259,6 @@ echo "   kubectl apply -f $APPLICATIONS_DIR/*/argocd/"
 echo "3. Check ArgoCD UI for application status"
 echo ""
 echo "💡 To add a new application:"
-echo "1. Add platform-requirements.yml to your app repository"
-echo "2. Run: ./scripts/generate-argocd-applications.sh <your-repo-url>"
+echo "1. Add the repository URL to application-sources.txt"
+echo "2. Run: cd config-repo && ./scripts/sync-app-repos.sh"
+echo "3. Run: ./scripts/generate-argocd-applications.sh ./local-app-repos/<app-name>"
