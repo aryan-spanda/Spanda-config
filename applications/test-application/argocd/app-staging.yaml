@@ -12,15 +12,15 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-05T07:40:11Z"
+    app.spanda.ai/generated-at: "2025-08-05T06:04:06Z"
     # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: test-app=ghcr.io/aryan-spanda/test-application
-    argocd-image-updater.argoproj.io/test-app.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/test-app.helm.image-tag: image.tag
-    argocd-image-updater.argoproj.io/test-app.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/test-app.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
-    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/write-back-target: "helmvalues:values-staging.yaml"
+    argocd-image-updater.argoproj.io/image-list: test-application=docker.io/aryanpola/sample-application
+    argocd-image-updater.argoproj.io/test-application.update-strategy: latest
+    argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
+    argocd-image-updater.argoproj.io/write-back-method: git:git@github.com:aryan-spanda/Spanda-config.git
+    argocd-image-updater.argoproj.io/git-branch: testing
+    argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/test-application.helm.image-tag: image.tag
 spec:
   project: spanda-applications
   source:
@@ -32,9 +32,9 @@ spec:
         - values-staging.yaml
       parameters:
         - name: image.repository
-          value: ghcr.io/aryan-spanda/test-application
+          value: docker.io/aryanpola/sample-application
         - name: image.tag
-          value: testing-placeholder
+          value: testing-8387c64
   destination:
     server: https://kubernetes.default.svc
     namespace: staging

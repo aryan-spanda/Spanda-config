@@ -84,7 +84,7 @@ jobs:
     uses: aryan-spanda/config-repo/.github/workflows/reusable-platform-ci-cd.yml@main
     with:
       app_name: test-application
-      docker_image_name: aryan-spanda/test-application
+      docker_image_name: aryanpola/sample-application
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
