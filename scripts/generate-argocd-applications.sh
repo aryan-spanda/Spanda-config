@@ -142,15 +142,15 @@ metadata:
     app.spanda.ai/generator: "platform-automation"
     app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: $APP_NAME-app=$IMAGE_REFERENCE
-    argocd-image-updater.argoproj.io/$APP_NAME-app.update-strategy: digest
-    argocd-image-updater.argoproj.io/$APP_NAME-app.allow-tags: regexp:^testing-[a-f0-9]{7}$
+    argocd-image-updater.argoproj.io/image-list: $APP_NAME=$IMAGE_REFERENCE
+    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: latest
+    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: regexp:^testing-.*
     argocd-image-updater.argoproj.io/write-back-method: git
     argocd-image-updater.argoproj.io/write-back-target: .
     argocd-image-updater.argoproj.io/git-branch: testing
     argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Spanda-config.git
-    argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/$APP_NAME-app.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/$APP_NAME.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag
 spec:
   project: spanda-applications
   source:
@@ -164,7 +164,7 @@ spec:
         - name: image.repository
           value: $IMAGE_REFERENCE
         - name: image.tag
-          value: testing-placeholder
+          value: testing-8387c64
   destination:
     server: https://kubernetes.default.svc
     namespace: $namespace
