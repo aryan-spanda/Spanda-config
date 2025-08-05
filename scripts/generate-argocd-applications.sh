@@ -67,6 +67,11 @@ generate_argocd_for_repo() {
     CONTAINER_ORG=$(yq eval '.container.organization // "aryan-spanda"' "$repo_path/platform-requirements.yml")
     CONTAINER_IMAGE=$(yq eval '.container.image // .app.name' "$repo_path/platform-requirements.yml")
     
+    # Extract GitOps configuration (with defaults)
+    TARGET_BRANCH=$(yq eval '.gitops.targetBranch // "testing"' "$repo_path/platform-requirements.yml")
+    TAG_PATTERN=$(yq eval '.gitops.tagPattern // "^testing-[0-9a-f]{7,8}$"' "$repo_path/platform-requirements.yml")
+    UPDATE_STRATEGY=$(yq eval '.gitops.updateStrategy // "newest-build"' "$repo_path/platform-requirements.yml")
+    
     # Build full image reference
     IMAGE_REFERENCE="$CONTAINER_REGISTRY/$CONTAINER_ORG/$CONTAINER_IMAGE"
     
@@ -150,17 +155,17 @@ metadata:
     app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: $APP_NAME=$IMAGE_REFERENCE
-    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: latest
-    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: regexp:^testing-
-    argocd-image-updater.argoproj.io/write-back-method: git:$REPO_URL
-    argocd-image-updater.argoproj.io/git-branch: testing
     argocd-image-updater.argoproj.io/$APP_NAME.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: $UPDATE_STRATEGY
+    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: regexp:$TAG_PATTERN
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/write-back-target: "helmvalues:$values_file"
 spec:
   project: spanda-applications
   source:
     repoURL: $REPO_URL
-    targetRevision: testing
+    targetRevision: $TARGET_BRANCH
     path: $CHART_PATH
     helm:
       valueFiles:
@@ -169,7 +174,7 @@ spec:
         - name: image.repository
           value: $IMAGE_REFERENCE
         - name: image.tag
-          value: testing-placeholder
+          value: $TARGET_BRANCH-placeholder
   destination:
     server: https://kubernetes.default.svc
     namespace: $namespace
