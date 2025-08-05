@@ -14,8 +14,8 @@ metadata:
     app.spanda.ai/generator: "platform-automation"
     app.spanda.ai/generated-at: "2025-08-05T06:04:06Z"
     # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: test-application=docker.io/aryanpola/sample-application
-    argocd-image-updater.argoproj.io/test-application.update-strategy: latest
+    argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
+    argocd-image-updater.argoproj.io/test-application.update-strategy: newest-build
     argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
     argocd-image-updater.argoproj.io/write-back-method: git:git@github.com:aryan-spanda/Spanda-config.git
     argocd-image-updater.argoproj.io/git-branch: testing
@@ -32,7 +32,7 @@ spec:
         - values-production.yaml
       parameters:
         - name: image.repository
-          value: docker.io/aryanpola/sample-application
+          value: aryanpola/sample-application
         - name: image.tag
           value: testing-8387c64
   destination:
