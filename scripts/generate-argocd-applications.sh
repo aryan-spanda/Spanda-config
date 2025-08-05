@@ -116,6 +116,13 @@ generate_argocd_for_repo() {
         
         echo "    🔄 Generating ArgoCD app for $env environment..."
         
+        # Determine values file name (handle production -> prod mapping)
+        local values_file
+        case "$env" in
+            "production") values_file="values-prod.yaml" ;;
+            *) values_file="values-$env.yaml" ;;
+        esac
+        
         # Determine application type from platform-requirements.yml or default
         local app_type
         app_type=$(yq eval '.app.type // "fullstack"' "$repo_path/platform-requirements.yml")
@@ -157,7 +164,7 @@ spec:
     path: $CHART_PATH
     helm:
       valueFiles:
-        - values-$env.yaml
+        - $values_file
       parameters:
         - name: image.repository
           value: $IMAGE_REFERENCE
