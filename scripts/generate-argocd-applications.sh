@@ -63,17 +63,18 @@ generate_argocd_for_repo() {
     CHART_PATH=$(yq eval '.app.chartPath' "$repo_path/platform-requirements.yml")
     
     # Extract container registry details
-    CONTAINER_REGISTRY=$(yq eval '.container.registry // "ghcr.io"' "$repo_path/platform-requirements.yml")
-    CONTAINER_ORG=$(yq eval '.container.organization // "aryan-spanda"' "$repo_path/platform-requirements.yml")
+    CONTAINER_REGISTRY=$(yq eval '.container.registry // "docker.io"' "$repo_path/platform-requirements.yml")
+    CONTAINER_ORG=$(yq eval '.container.organization // "aryanpola"' "$repo_path/platform-requirements.yml")
     CONTAINER_IMAGE=$(yq eval '.container.image // .app.name' "$repo_path/platform-requirements.yml")
     
-    # Extract GitOps configuration (with defaults)
-    TARGET_BRANCH=$(yq eval '.gitops.targetBranch // "testing"' "$repo_path/platform-requirements.yml")
-    TAG_PATTERN=$(yq eval '.gitops.tagPattern // "^testing-[0-9a-f]{7,8}$"' "$repo_path/platform-requirements.yml")
-    UPDATE_STRATEGY=$(yq eval '.gitops.updateStrategy // "newest-build"' "$repo_path/platform-requirements.yml")
-    
     # Build full image reference
-    IMAGE_REFERENCE="$CONTAINER_REGISTRY/$CONTAINER_ORG/$CONTAINER_IMAGE"
+    if [[ "$CONTAINER_REGISTRY" == "docker.io" ]]; then
+        # For Docker Hub, don't include registry prefix
+        IMAGE_REFERENCE="$CONTAINER_ORG/$CONTAINER_IMAGE"
+    else
+        # For other registries, include registry
+        IMAGE_REFERENCE="$CONTAINER_REGISTRY/$CONTAINER_ORG/$CONTAINER_IMAGE"
+    fi
     
     if [[ "$APP_NAME" == "null" || -z "$APP_NAME" ]]; then
         echo "❌ Error: app.name is required in platform-requirements.yml"
@@ -121,13 +122,6 @@ generate_argocd_for_repo() {
         
         echo "    🔄 Generating ArgoCD app for $env environment..."
         
-        # Determine values file name (handle production -> prod mapping)
-        local values_file
-        case "$env" in
-            "production") values_file="values-prod.yaml" ;;
-            *) values_file="values-$env.yaml" ;;
-        esac
-        
         # Determine application type from platform-requirements.yml or default
         local app_type
         app_type=$(yq eval '.app.type // "fullstack"' "$repo_path/platform-requirements.yml")
@@ -153,28 +147,28 @@ metadata:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
     app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    # ArgoCD Image Updater configuration
+    # ArgoCD Image Updater configuration - Fixed write-back-method
     argocd-image-updater.argoproj.io/image-list: $APP_NAME=$IMAGE_REFERENCE
+    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
+    argocd-image-updater.argoproj.io/git-branch: testing
     argocd-image-updater.argoproj.io/$APP_NAME.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag
-    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: $UPDATE_STRATEGY
-    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: regexp:$TAG_PATTERN
-    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/write-back-target: "helmvalues:$values_file"
 spec:
   project: spanda-applications
   source:
     repoURL: $REPO_URL
-    targetRevision: $TARGET_BRANCH
+    targetRevision: testing
     path: $CHART_PATH
     helm:
       valueFiles:
-        - $values_file
+        - values-$env.yaml
       parameters:
         - name: image.repository
           value: $IMAGE_REFERENCE
         - name: image.tag
-          value: $TARGET_BRANCH-placeholder
+          value: testing-placeholder
   destination:
     server: https://kubernetes.default.svc
     namespace: $namespace
