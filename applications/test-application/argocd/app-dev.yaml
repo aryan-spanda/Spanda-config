@@ -12,12 +12,12 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-05T06:04:06Z"
+    app.spanda.ai/generated-at: "2025-08-05T07:40:11Z"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: test-application=ghcr.io/aryan-spanda/test-application
     argocd-image-updater.argoproj.io/test-application.update-strategy: latest
     argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-
-    argocd-image-updater.argoproj.io/write-back-method: git:git@github.com:aryan-spanda/Spanda-config.git
+    argocd-image-updater.argoproj.io/write-back-method: git:git@github.com:aryan-spanda/Test-Application.git
     argocd-image-updater.argoproj.io/git-branch: testing
     argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/test-application.helm.image-tag: image.tag
@@ -34,7 +34,7 @@ spec:
         - name: image.repository
           value: ghcr.io/aryan-spanda/test-application
         - name: image.tag
-          value: testing-8387c64
+          value: testing-placeholder
   destination:
     server: https://kubernetes.default.svc
     namespace: development
