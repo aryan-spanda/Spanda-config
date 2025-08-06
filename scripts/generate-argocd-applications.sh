@@ -8,12 +8,30 @@
 #
 # Usage: ./generate-argocd-applications.sh [repo-path] [repo-path] ...
 # Note: Now accepts local paths instead of URLs
+#
+# Environment Variables:
+#   ENABLE_IMAGE_UPDATER=true/false   - Enable/disable ArgoCD Image Updater (default: true)
+#   DEFAULT_UPDATE_STRATEGY=strategy  - Image update strategy (default: newest-build)
+#   DEFAULT_TAG_PATTERN=pattern       - Tag pattern for updates (default: testing-[commit])
+#   DEFAULT_GIT_BRANCH=branch         - Git branch for write-back (default: testing)
+#   DEFAULT_POLLING_INTERVAL=interval - How often to check for new images (default: 5m)
+#
+# Examples:
+#   # Generate with Image Updater enabled (default)
+#   ./generate-argocd-applications.sh ./local-app-repos/test-app
+#
+#   # Generate with Image Updater disabled
+#   ENABLE_IMAGE_UPDATER=false ./generate-argocd-applications.sh ./local-app-repos/test-app
+#
+#   # Generate with custom polling interval
+#   DEFAULT_POLLING_INTERVAL=2m ./generate-argocd-applications.sh
 # =====================================================================
 
 set -e
 
 echo "🚀 Spanda Platform - ArgoCD Application Generator"
 echo "================================================="
+echo ""
 
 # Check for yq dependency
 if ! command -v yq &> /dev/null; then
@@ -31,6 +49,28 @@ fi
 # Configuration
 CONFIG_REPO_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
 APPLICATIONS_DIR="$CONFIG_REPO_ROOT/applications"
+
+# ArgoCD Image Updater Configuration
+# Set to "true" to enable automatic image updates, "false" to disable
+ENABLE_IMAGE_UPDATER="${ENABLE_IMAGE_UPDATER:-true}"
+
+# Default Image Updater settings (only used if ENABLE_IMAGE_UPDATER=true)
+# For your CI/CD workflow that builds images with branch-commit pattern
+DEFAULT_UPDATE_STRATEGY="${DEFAULT_UPDATE_STRATEGY:-newest-build}"
+DEFAULT_TAG_PATTERN="${DEFAULT_TAG_PATTERN:-"regexp:^testing-[0-9a-f]{7,8}\\$"}"
+DEFAULT_GIT_BRANCH="${DEFAULT_GIT_BRANCH:-testing}"
+DEFAULT_POLLING_INTERVAL="${DEFAULT_POLLING_INTERVAL:-5m}"
+
+# Display configuration after defaults are set
+echo "📋 Configuration:"
+echo "  • Image Updater: $(if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then echo "✅ ENABLED"; else echo "❌ DISABLED"; fi)"
+if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then
+    echo "  • Update Strategy: $DEFAULT_UPDATE_STRATEGY"
+    echo "  • Tag Pattern: $DEFAULT_TAG_PATTERN"
+    echo "  • Git Branch: $DEFAULT_GIT_BRANCH"
+    echo "  • Polling Interval: $DEFAULT_POLLING_INTERVAL"
+fi
+echo ""
 
 # Function to generate ArgoCD applications for a local repository
 generate_argocd_for_repo() {
@@ -112,12 +152,14 @@ generate_argocd_for_repo() {
             *) namespace="$env" ;;
         esac
         
-        # Determine sync policy (manual for production)
+        # Determine sync policy - more controlled approach
         local sync_policy
         if [[ "$env" == "prod" || "$env" == "production" ]]; then
             sync_policy="manual"
+        elif [[ "$env" == "staging" ]]; then
+            sync_policy="manual"  # Manual sync for staging too for better control
         else
-            sync_policy="auto"
+            sync_policy="auto"    # Only auto-sync for dev environment
         fi
         
         echo "    🔄 Generating ArgoCD app for $env environment..."
@@ -146,20 +188,31 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    # ArgoCD Image Updater configuration - Fixed write-back-method
+    app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"$(if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then echo "
+    # ArgoCD Image Updater configuration - ENABLED
     argocd-image-updater.argoproj.io/image-list: $APP_NAME=$IMAGE_REFERENCE
-    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
+    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: $DEFAULT_UPDATE_STRATEGY
+    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: $DEFAULT_TAG_PATTERN
+    argocd-image-updater.argoproj.io/$APP_NAME.polling-interval: $DEFAULT_POLLING_INTERVAL
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
-    argocd-image-updater.argoproj.io/git-branch: testing
+    argocd-image-updater.argoproj.io/git-branch: $DEFAULT_GIT_BRANCH
     argocd-image-updater.argoproj.io/$APP_NAME.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag"; else echo "
+    # ArgoCD Image Updater configuration - DISABLED
+    # To enable automatic image updates, set ENABLE_IMAGE_UPDATER=true
+    # argocd-image-updater.argoproj.io/image-list: $APP_NAME=$IMAGE_REFERENCE
+    # argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: $DEFAULT_UPDATE_STRATEGY
+    # argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: $DEFAULT_TAG_PATTERN
+    # argocd-image-updater.argoproj.io/$APP_NAME.polling-interval: $DEFAULT_POLLING_INTERVAL
+    # argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
+    # argocd-image-updater.argoproj.io/git-branch: $DEFAULT_GIT_BRANCH
+    # argocd-image-updater.argoproj.io/$APP_NAME.helm.image-name: image.repository
+    # argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag"; fi)
 spec:
   project: spanda-applications
   source:
     repoURL: $REPO_URL
-    targetRevision: testing
+    targetRevision: HEAD  # Use HEAD for latest commit, more stable than branch name
     path: $CHART_PATH
     helm:
       valueFiles:
@@ -168,7 +221,7 @@ spec:
         - name: image.repository
           value: $IMAGE_REFERENCE
         - name: image.tag
-          value: testing-placeholder
+          value: latest  # Default tag, should be overridden by CI/CD or manual updates
   destination:
     server: https://kubernetes.default.svc
     namespace: $namespace
@@ -295,11 +348,27 @@ echo "🎉 ArgoCD application generation complete!"
 echo ""
 echo "📁 Generated applications in: $APPLICATIONS_DIR"
 echo ""
-echo "🚀 Next steps:"
+echo "� Configuration Summary:"
+echo "  • Image Updater: $(if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then echo "✅ ENABLED - Automatic image updates active"; else echo "❌ DISABLED - Manual image updates required"; fi)"
+echo "  • Sync Policy: Dev=Auto, Staging=Manual, Production=Manual"
+echo ""
+echo "�🚀 Next steps:"
 echo "1. Review the generated ArgoCD applications"
 echo "2. Apply them to your cluster:"
 echo "   kubectl apply -f $APPLICATIONS_DIR/*/argocd/"
 echo "3. Check ArgoCD UI for application status"
+echo ""
+if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then
+    echo "� Image updates are ENABLED - ArgoCD will automatically update images every $DEFAULT_POLLING_INTERVAL"
+    echo "   • Strategy: $DEFAULT_UPDATE_STRATEGY"
+    echo "   • Tag Pattern: $DEFAULT_TAG_PATTERN"
+    echo "   • To disable automatic updates:"
+    echo "   ENABLE_IMAGE_UPDATER=false ./scripts/generate-argocd-applications.sh"
+else
+    echo "💡 Image updates are DISABLED - Manual image updates required."
+    echo "   To enable automatic image updates:"
+    echo "   ENABLE_IMAGE_UPDATER=true ./scripts/generate-argocd-applications.sh"
+fi
 echo ""
 echo "💡 To add a new application:"
 echo "1. Add the repository URL to application-sources.txt"

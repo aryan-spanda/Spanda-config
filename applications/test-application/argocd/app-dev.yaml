@@ -12,11 +12,12 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-05T06:04:06Z"
-    # ArgoCD Image Updater configuration
+    app.spanda.ai/generated-at: "2025-08-06T10:48:31Z"
+    # ArgoCD Image Updater configuration - ENABLED
     argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
     argocd-image-updater.argoproj.io/test-application.update-strategy: newest-build
     argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
+    argocd-image-updater.argoproj.io/test-application.polling-interval: 5m
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
     argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
@@ -25,7 +26,7 @@ spec:
   project: spanda-applications
   source:
     repoURL: https://github.com/aryan-spanda/Test-Application.git
-    targetRevision: testing
+    targetRevision: HEAD  # Use HEAD for latest commit, more stable than branch name
     path: deploy/helm
     helm:
       valueFiles:
@@ -34,7 +35,7 @@ spec:
         - name: image.repository
           value: aryanpola/sample-application
         - name: image.tag
-          value: testing-8387c64
+          value: latest  # Default tag, should be overridden by CI/CD or manual updates
   destination:
     server: https://kubernetes.default.svc
     namespace: development
