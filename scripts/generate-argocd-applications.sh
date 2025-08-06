@@ -239,10 +239,10 @@ main() {
     mkdir -p "$TEMP_DIR"
     trap "rm -rf $TEMP_DIR" EXIT
     
-    # Get list of applications from the applications directory
-    local apps_dir="$BASE_DIR/applications"
+    # Get list of applications from the local-app-repos directory
+    local apps_dir="$BASE_DIR/local-app-repos"
     if [[ ! -d "$apps_dir" ]]; then
-        error "Applications directory not found: $apps_dir"
+        error "Local app repositories directory not found: $apps_dir"
         exit 1
     fi
     
@@ -251,7 +251,7 @@ main() {
             local app_name=$(basename "$app_dir")
             log "Processing application: $app_name"
             
-            # Look for platform-requirements.yml in the application directory
+            # Look for platform-requirements.yml in the local app repository directory
             local requirements_file="$app_dir/platform-requirements.yml"
             
             if [[ -f "$requirements_file" ]]; then
@@ -272,7 +272,8 @@ main() {
                     if [[ -n "$env" && "$env" != "null" ]]; then
                         log "Generating ArgoCD application for $app_name-$env"
                         
-                        local output_file="$app_dir/argocd/app-$env.yaml"
+                        # Output to the applications directory for ArgoCD discovery
+                        local output_file="$BASE_DIR/applications/$app_name/argocd/app-$env.yaml"
                         mkdir -p "$(dirname "$output_file")"
                         
                         generate_argocd_app "$app_name" "$env" "$requirements_file" "$modules_file" > "$output_file"
