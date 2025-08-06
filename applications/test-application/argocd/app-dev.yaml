@@ -12,21 +12,119 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-06T10:48:31Z"
-    # ArgoCD Image Updater configuration - ENABLED
+    app.spanda.ai/generated-at: "2025-08-06T12:48:31Z"
+    # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
-    argocd-image-updater.argoproj.io/test-application.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
-    argocd-image-updater.argoproj.io/test-application.polling-interval: 5m
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
+    argocd-image-updater.argoproj.io/test-application.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
     argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/test-application.helm.image-tag: image.tag
 spec:
   project: spanda-applications
-  source:
-    repoURL: https://github.com/aryan-spanda/Test-Application.git
-    targetRevision: HEAD  # Use HEAD for latest commit, more stable than branch name
+  sources:
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/net-vpc-baremetal/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/net-lb-app-external-baremetal/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/net-lb-app-internal-baremetal/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/net-firewall-baremetal/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/security-ssl-termination/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/observability-logging/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/observability-metrics/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/observability-monitoring/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev
+  - repoURL: https://github.com/aryan-spanda/spanda-config.git
+    targetRevision: main
+    path: bare-metal/modules/security-secrets-management/helm
+    helm:
+      valueFiles:
+        - values-dev.yaml
+      parameters:
+        - name: app.name
+          value: test-application
+        - name: app.environment
+          value: dev  # Application source (highest priority - deployed last)
+  - repoURL: https://github.com/aryan-spanda/Test-Application.git
+    targetRevision: testing
     path: deploy/helm
     helm:
       valueFiles:
@@ -35,16 +133,17 @@ spec:
         - name: image.repository
           value: aryanpola/sample-application
         - name: image.tag
-          value: latest  # Default tag, should be overridden by CI/CD or manual updates
+          value: testing-placeholder
   destination:
     server: https://kubernetes.default.svc
-    namespace: development
+    namespace: dev
   syncPolicy:
     automated:
       selfHeal: true
       prune: true
     syncOptions:
       - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
     retry:
       limit: 5
       backoff:
@@ -64,3 +163,5 @@ spec:
       value: 'development-team'
     - name: 'Application Type'
       value: 'fullstack'
+    - name: 'Platform Modules'
+      value: 'address_management,vpc_networking,external_load_balancer,internal_load_balancer,firewall,ssl_termination,logging,monitoring,metrics,secrets_management'

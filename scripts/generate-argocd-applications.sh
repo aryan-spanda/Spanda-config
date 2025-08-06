@@ -1,376 +1,294 @@
 #!/bin/bash
 
-# =====================================================================
-# Spanda Platform - ArgoCD Application Generator
-# =====================================================================
-# This script automatically generates ArgoCD application YAML files
-# by reading platform-requirements.yml from application repositories.
-#
-# Usage: ./generate-argocd-applications.sh [repo-path] [repo-path] ...
-# Note: Now accepts local paths instead of URLs
-#
-# Environment Variables:
-#   ENABLE_IMAGE_UPDATER=true/false   - Enable/disable ArgoCD Image Updater (default: true)
-#   DEFAULT_UPDATE_STRATEGY=strategy  - Image update strategy (default: newest-build)
-#   DEFAULT_TAG_PATTERN=pattern       - Tag pattern for updates (default: testing-[commit])
-#   DEFAULT_GIT_BRANCH=branch         - Git branch for write-back (default: testing)
-#   DEFAULT_POLLING_INTERVAL=interval - How often to check for new images (default: 5m)
-#
-# Examples:
-#   # Generate with Image Updater enabled (default)
-#   ./generate-argocd-applications.sh ./local-app-repos/test-app
-#
-#   # Generate with Image Updater disabled
-#   ENABLE_IMAGE_UPDATER=false ./generate-argocd-applications.sh ./local-app-repos/test-app
-#
-#   # Generate with custom polling interval
-#   DEFAULT_POLLING_INTERVAL=2m ./generate-argocd-applications.sh
-# =====================================================================
-
-set -e
-
-echo "🚀 Spanda Platform - ArgoCD Application Generator"
-echo "================================================="
-echo ""
-
-# Check for yq dependency
-if ! command -v yq &> /dev/null; then
-    echo "❌ Error: yq is required but not installed."
-    echo "Install it with:"
-    echo "  # Windows (PowerShell):"
-    echo "  Invoke-WebRequest -Uri https://github.com/mikefarah/yq/releases/latest/download/yq_windows_amd64.exe -OutFile yq.exe"
-    echo "  # Linux:"
-    echo "  curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o yq && chmod +x yq"
-    echo "  # macOS:"
-    echo "  brew install yq"
-    exit 1
-fi
+set -euo pipefail
 
 # Configuration
-CONFIG_REPO_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
-APPLICATIONS_DIR="$CONFIG_REPO_ROOT/applications"
+CONFIG_REPO_URL="https://github.com/aryan-spanda/spanda-config.git"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+TEMP_DIR="/tmp/platform-generation-$$"
+MODULE_MAPPINGS_FILE="$BASE_DIR/cluster-config/config/module-mappings.yml"
 
-# ArgoCD Image Updater Configuration
-# Set to "true" to enable automatic image updates, "false" to disable
-ENABLE_IMAGE_UPDATER="${ENABLE_IMAGE_UPDATER:-true}"
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-# Default Image Updater settings (only used if ENABLE_IMAGE_UPDATER=true)
-# For your CI/CD workflow that builds images with branch-commit pattern
-DEFAULT_UPDATE_STRATEGY="${DEFAULT_UPDATE_STRATEGY:-newest-build}"
-DEFAULT_TAG_PATTERN="${DEFAULT_TAG_PATTERN:-"regexp:^testing-[0-9a-f]{7,8}\\$"}"
-DEFAULT_GIT_BRANCH="${DEFAULT_GIT_BRANCH:-testing}"
-DEFAULT_POLLING_INTERVAL="${DEFAULT_POLLING_INTERVAL:-5m}"
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
+}
 
-# Display configuration after defaults are set
-echo "📋 Configuration:"
-echo "  • Image Updater: $(if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then echo "✅ ENABLED"; else echo "❌ DISABLED"; fi)"
-if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then
-    echo "  • Update Strategy: $DEFAULT_UPDATE_STRATEGY"
-    echo "  • Tag Pattern: $DEFAULT_TAG_PATTERN"
-    echo "  • Git Branch: $DEFAULT_GIT_BRANCH"
-    echo "  • Polling Interval: $DEFAULT_POLLING_INTERVAL"
-fi
-echo ""
+error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
 
-# Function to generate ArgoCD applications for a local repository
-generate_argocd_for_repo() {
-    local repo_path="$1"
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# Function to parse YAML using yq
+parse_yaml() {
+    local file=$1
+    local query=$2
+    yq eval "$query" "$file" 2>/dev/null || echo ""
+}
+
+# Function to get required platform modules from platform-requirements.yml
+get_required_modules() {
+    local requirements_file=$1
+    local modules=()
     
-    # Convert to absolute path if relative
-    if [[ ! "$repo_path" = /* ]]; then
-        repo_path="$(realpath "$repo_path")"
-    fi
-    
-    echo "📥 Processing local repository: $repo_path"
-    
-    # Check if directory exists
-    if [[ ! -d "$repo_path" ]]; then
-        echo "❌ Directory not found: $repo_path"
-        return 1
-    fi
-    
-    # Check if platform-requirements.yml exists
-    if [[ ! -f "$repo_path/platform-requirements.yml" ]]; then
-        echo "⏭️  No platform-requirements.yml found in $repo_path"
-        return 0
-    fi
-    
-    echo "✅ Found platform-requirements.yml"
-    
-    # Extract application details
-    APP_NAME=$(yq eval '.app.name' "$repo_path/platform-requirements.yml")
-    REPO_URL=$(yq eval '.app.repoURL' "$repo_path/platform-requirements.yml")
-    CHART_PATH=$(yq eval '.app.chartPath' "$repo_path/platform-requirements.yml")
-    
-    # Extract container registry details
-    CONTAINER_REGISTRY=$(yq eval '.container.registry // "docker.io"' "$repo_path/platform-requirements.yml")
-    CONTAINER_ORG=$(yq eval '.container.organization // "aryanpola"' "$repo_path/platform-requirements.yml")
-    CONTAINER_IMAGE=$(yq eval '.container.image // .app.name' "$repo_path/platform-requirements.yml")
-    
-    # Build full image reference
-    if [[ "$CONTAINER_REGISTRY" == "docker.io" ]]; then
-        # For Docker Hub, don't include registry prefix
-        IMAGE_REFERENCE="$CONTAINER_ORG/$CONTAINER_IMAGE"
-    else
-        # For other registries, include registry
-        IMAGE_REFERENCE="$CONTAINER_REGISTRY/$CONTAINER_ORG/$CONTAINER_IMAGE"
-    fi
-    
-    if [[ "$APP_NAME" == "null" || -z "$APP_NAME" ]]; then
-        echo "❌ Error: app.name is required in platform-requirements.yml"
-        return 1
-    fi
-    
-    echo "  📦 App Name: $APP_NAME"
-    echo "  📂 Chart Path: $CHART_PATH"
-    echo "  🐳 Container Image: $IMAGE_REFERENCE"
-    
-    # Create application directory
-    APP_DIR="$APPLICATIONS_DIR/$APP_NAME/argocd"
-    mkdir -p "$APP_DIR"
-    
-    # Read environments array
-    ENVIRONMENTS=$(yq eval '.environments[]' "$repo_path/platform-requirements.yml")
-    
-    if [[ -z "$ENVIRONMENTS" ]]; then
-        echo "❌ Error: No environments specified in platform-requirements.yml"
-        return 1
-    fi
-    
-    echo "  🌍 Environments: $(echo "$ENVIRONMENTS" | tr '\n' ' ')"
-    
-    # Generate ArgoCD application for each environment
-    echo "$ENVIRONMENTS" | while read -r env; do
-        [[ -z "$env" ]] && continue
-        
-        # Determine namespace based on environment
-        local namespace
-        case "$env" in
-            "dev") namespace="development" ;;
-            "staging") namespace="staging" ;;
-            "prod"|"production") namespace="production" ;;
-            *) namespace="$env" ;;
-        esac
-        
-        # Determine sync policy - more controlled approach
-        local sync_policy
-        if [[ "$env" == "prod" || "$env" == "production" ]]; then
-            sync_policy="manual"
-        elif [[ "$env" == "staging" ]]; then
-            sync_policy="manual"  # Manual sync for staging too for better control
-        else
-            sync_policy="auto"    # Only auto-sync for dev environment
+    # Read all platform modules that are set to true
+    while IFS= read -r module; do
+        if [[ -n "$module" && "$module" != "null" ]]; then
+            local is_enabled=$(parse_yaml "$requirements_file" ".platform.modules.$module")
+            if [[ "$is_enabled" == "true" ]]; then
+                modules+=("$module")
+            fi
         fi
+    done < <(parse_yaml "$requirements_file" '.platform.modules | keys | .[]')
+    
+    printf '%s\n' "${modules[@]}"
+}
+
+# Function to generate platform module sources for ArgoCD
+generate_platform_sources() {
+    local app_name=$1
+    local environment=$2
+    local required_modules_file=$3
+    local sources_yaml=""
+    
+    # Sort modules by priority
+    local sorted_modules=()
+    while IFS= read -r module; do
+        if [[ -n "$module" ]]; then
+            sorted_modules+=("$module")
+        fi
+    done < <(cat "$required_modules_file" | while read -r module; do
+        priority=$(parse_yaml "$MODULE_MAPPINGS_FILE" ".platform_modules.$module.priority // 999")
+        echo "$priority:$module"
+    done | sort -n | cut -d':' -f2)
+    
+    for module in "${sorted_modules[@]}"; do
+        local chart_path=$(parse_yaml "$MODULE_MAPPINGS_FILE" ".platform_modules.$module.chart_path")
         
-        echo "    🔄 Generating ArgoCD app for $env environment..."
-        
-        # Determine application type from platform-requirements.yml or default
-        local app_type
-        app_type=$(yq eval '.app.type // "fullstack"' "$repo_path/platform-requirements.yml")
-        
-        # Determine team from platform-requirements.yml or default
-        local team
-        team=$(yq eval '.app.team // "platform-team"' "$repo_path/platform-requirements.yml")
-        
-        # Generate ArgoCD Application YAML
-        cat > "$APP_DIR/app-$env.yaml" << EOF
+        if [[ -n "$chart_path" && "$chart_path" != "null" ]]; then
+            # Add source for this module
+            sources_yaml+="  - repoURL: $CONFIG_REPO_URL
+    targetRevision: main
+    path: $chart_path
+    helm:
+      valueFiles:
+        - values-$environment.yaml
+      parameters:
+        - name: app.name
+          value: $app_name
+        - name: app.environment
+          value: $environment
+"
+        fi
+    done
+    
+    echo "$sources_yaml"
+}
+
+# Function to generate ArgoCD application manifest
+generate_argocd_app() {
+    local app_name=$1
+    local environment=$2
+    local app_config_file=$3
+    local required_modules_file=$4
+    
+    # Parse application configuration
+    local repo_url=$(parse_yaml "$app_config_file" '.app.repoURL')
+    local chart_path=$(parse_yaml "$app_config_file" '.app.chartPath')
+    local team=$(parse_yaml "$app_config_file" '.app.team')
+    local app_type=$(parse_yaml "$app_config_file" '.app.type')
+    local container_registry=$(parse_yaml "$app_config_file" '.container.registry')
+    local container_org=$(parse_yaml "$app_config_file" '.container.organization')
+    local container_image=$(parse_yaml "$app_config_file" '.container.image')
+    
+    # Generate platform module sources
+    local platform_sources=$(generate_platform_sources "$app_name" "$environment" "$required_modules_file")
+    
+    # Determine target revision and image tag pattern based on environment
+    local target_revision="main"
+    local image_tag_pattern="^main-[0-9a-f]{7,8}$"
+    local image_tag_placeholder="main-placeholder"
+    
+    case "$environment" in
+        "dev")
+            target_revision="testing"
+            image_tag_pattern="^testing-[0-9a-f]{7,8}$"
+            image_tag_placeholder="testing-placeholder"
+            ;;
+        "staging")
+            target_revision="staging"
+            image_tag_pattern="^staging-[0-9a-f]{7,8}$"
+            image_tag_placeholder="staging-placeholder"
+            ;;
+        "production")
+            target_revision="main"
+            image_tag_pattern="^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+            image_tag_placeholder="v1.0.0"
+            ;;
+    esac
+    
+    # Generate the ArgoCD application manifest
+    cat << EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: $APP_NAME-$env
+  name: $app_name-$environment
   namespace: argocd
   labels:
-    app.kubernetes.io/name: $APP_NAME
+    app.kubernetes.io/name: $app_name
     app.kubernetes.io/part-of: spandaai-platform
     team: $team
-    environment: $env
+    environment: $environment
     app-type: $app_type
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"$(if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then echo "
-    # ArgoCD Image Updater configuration - ENABLED
-    argocd-image-updater.argoproj.io/image-list: $APP_NAME=$IMAGE_REFERENCE
-    argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: $DEFAULT_UPDATE_STRATEGY
-    argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: $DEFAULT_TAG_PATTERN
-    argocd-image-updater.argoproj.io/$APP_NAME.polling-interval: $DEFAULT_POLLING_INTERVAL
+    app.spanda.ai/generated-at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    # ArgoCD Image Updater configuration
+    argocd-image-updater.argoproj.io/image-list: $app_name=$container_org/$container_image
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
-    argocd-image-updater.argoproj.io/git-branch: $DEFAULT_GIT_BRANCH
-    argocd-image-updater.argoproj.io/$APP_NAME.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag"; else echo "
-    # ArgoCD Image Updater configuration - DISABLED
-    # To enable automatic image updates, set ENABLE_IMAGE_UPDATER=true
-    # argocd-image-updater.argoproj.io/image-list: $APP_NAME=$IMAGE_REFERENCE
-    # argocd-image-updater.argoproj.io/$APP_NAME.update-strategy: $DEFAULT_UPDATE_STRATEGY
-    # argocd-image-updater.argoproj.io/$APP_NAME.allow-tags: $DEFAULT_TAG_PATTERN
-    # argocd-image-updater.argoproj.io/$APP_NAME.polling-interval: $DEFAULT_POLLING_INTERVAL
-    # argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
-    # argocd-image-updater.argoproj.io/git-branch: $DEFAULT_GIT_BRANCH
-    # argocd-image-updater.argoproj.io/$APP_NAME.helm.image-name: image.repository
-    # argocd-image-updater.argoproj.io/$APP_NAME.helm.image-tag: image.tag"; fi)
+    argocd-image-updater.argoproj.io/git-branch: $target_revision
+    argocd-image-updater.argoproj.io/$app_name.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/$app_name.allow-tags: regexp:$image_tag_pattern
+    argocd-image-updater.argoproj.io/$app_name.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/$app_name.helm.image-tag: image.tag
 spec:
   project: spanda-applications
-  source:
-    repoURL: $REPO_URL
-    targetRevision: HEAD  # Use HEAD for latest commit, more stable than branch name
-    path: $CHART_PATH
+  sources:
+$platform_sources  # Application source (highest priority - deployed last)
+  - repoURL: $repo_url
+    targetRevision: $target_revision
+    path: $chart_path
     helm:
       valueFiles:
-        - values-$env.yaml
+        - values-$environment.yaml
       parameters:
         - name: image.repository
-          value: $IMAGE_REFERENCE
+          value: $container_org/$container_image
         - name: image.tag
-          value: latest  # Default tag, should be overridden by CI/CD or manual updates
+          value: $image_tag_placeholder
   destination:
     server: https://kubernetes.default.svc
-    namespace: $namespace
-  syncPolicy:$(if [[ "$sync_policy" == "auto" ]]; then echo "
+    namespace: $environment
+  syncPolicy:
     automated:
       selfHeal: true
-      prune: true"; fi)
+      prune: true
     syncOptions:
       - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
     retry:
       limit: 5
       backoff:
         duration: 5s
         factor: 2
-        maxDuration: 3m$(if [[ "$env" == "prod" || "$env" == "production" ]]; then echo "
-  revisionHistoryLimit: 10"; fi)
+        maxDuration: 3m
   info:
     - name: 'Generated By'
       value: 'Platform Automation'
     - name: 'Source Repository'
-      value: '$REPO_URL'
+      value: '$repo_url'
     - name: 'Chart Path'
-      value: '$CHART_PATH'
+      value: '$chart_path'
     - name: 'Environment'
-      value: '$env'
+      value: '$environment'
     - name: 'Team'
       value: '$team'
     - name: 'Application Type'
       value: '$app_type'
+    - name: 'Platform Modules'
+      value: '$(cat "$required_modules_file" | tr '\n' ',' | sed 's/,$//')'
 EOF
-        
-        echo "    ✅ Generated: $APP_DIR/app-$env.yaml"
-    done
-    
-    # Create a README for the application
-    cat > "$APP_DIR/../README.md" << EOF
-# $APP_NAME - ArgoCD Applications
-
-This directory contains ArgoCD application definitions for \`$APP_NAME\`.
-
-## 📁 Structure
-\`\`\`
-applications/$APP_NAME/
-├── README.md           # This file
-└── argocd/            # ArgoCD application manifests
-$(ls -1 "$APP_DIR" | sed 's/^/    ├── /')
-\`\`\`
-
-## 🚀 Deployment
-
-### Apply ArgoCD Applications
-\`\`\`bash
-# Apply all environments
-kubectl apply -f applications/$APP_NAME/argocd/
-
-# Apply specific environment
-kubectl apply -f applications/$APP_NAME/argocd/app-dev.yaml
-\`\`\`
-
-### Sync Applications
-\`\`\`bash
-# Sync all environments
-$(echo "$ENVIRONMENTS" | while read -r env; do [[ -n "$env" ]] && echo "argocd app sync $APP_NAME-$env"; done)
-
-# Sync specific environment
-argocd app sync $APP_NAME-dev
-\`\`\`
-
-## 📋 Application Details
-
-- **Repository**: $REPO_URL
-- **Chart Path**: $CHART_PATH
-- **Environments**: $(echo "$ENVIRONMENTS" | tr '\n' ' ')
-
-## 🔄 Auto-Generated
-
-These files were automatically generated from \`platform-requirements.yml\`.
-To update, run the sync and generation process:
-
-\`\`\`bash
-cd config-repo
-./scripts/sync-app-repos.sh
-./scripts/generate-argocd-applications.sh ./local-app-repos/$APP_NAME
-\`\`\`
-EOF
-    
-    echo "  📝 Generated README: $APP_DIR/../README.md"
-    echo "  ✅ ArgoCD applications generated for $APP_NAME"
 }
 
-# Main execution
-if [[ $# -eq 0 ]]; then
-    echo "📋 No local paths specified. Processing all repositories in local-app-repos/..."
+# Main function
+main() {
+    log "Starting ArgoCD application generation with platform modules..."
     
-    LOCAL_REPOS_DIR="$CONFIG_REPO_ROOT/local-app-repos"
-    if [[ ! -d "$LOCAL_REPOS_DIR" ]]; then
-        echo "❌ Error: $LOCAL_REPOS_DIR not found."
-        echo "   Please run ./scripts/sync-app-repos.sh first to sync repositories."
+    # Check dependencies
+    if ! command -v yq &> /dev/null; then
+        error "yq is required but not installed. Please install yq."
         exit 1
     fi
     
-    # Process all directories in local-app-repos
-    REPOS=()
-    for repo_dir in "$LOCAL_REPOS_DIR"/*; do
-        if [[ -d "$repo_dir" ]]; then
-            REPOS+=("$repo_dir")
+    if ! command -v git &> /dev/null; then
+        error "git is required but not installed."
+        exit 1
+    fi
+    
+    # Check if module mappings file exists
+    if [[ ! -f "$MODULE_MAPPINGS_FILE" ]]; then
+        error "Module mappings file not found: $MODULE_MAPPINGS_FILE"
+        exit 1
+    fi
+    
+    # Create temp directory
+    mkdir -p "$TEMP_DIR"
+    trap "rm -rf $TEMP_DIR" EXIT
+    
+    # Get list of applications from the applications directory
+    local apps_dir="$BASE_DIR/applications"
+    if [[ ! -d "$apps_dir" ]]; then
+        error "Applications directory not found: $apps_dir"
+        exit 1
+    fi
+    
+    for app_dir in "$apps_dir"/*; do
+        if [[ -d "$app_dir" ]]; then
+            local app_name=$(basename "$app_dir")
+            log "Processing application: $app_name"
+            
+            # Look for platform-requirements.yml in the application directory
+            local requirements_file="$app_dir/platform-requirements.yml"
+            
+            if [[ -f "$requirements_file" ]]; then
+                # Get required modules
+                local modules_file="$TEMP_DIR/${app_name}_modules.txt"
+                get_required_modules "$requirements_file" > "$modules_file"
+                
+                if [[ ! -s "$modules_file" ]]; then
+                    warn "No platform modules required for $app_name"
+                    echo "" > "$modules_file"
+                fi
+                
+                # Get environments from requirements
+                local environments=($(parse_yaml "$requirements_file" '.environments[]'))
+                
+                # Generate ArgoCD applications for each environment
+                for env in "${environments[@]}"; do
+                    if [[ -n "$env" && "$env" != "null" ]]; then
+                        log "Generating ArgoCD application for $app_name-$env"
+                        
+                        local output_file="$app_dir/argocd/app-$env.yaml"
+                        mkdir -p "$(dirname "$output_file")"
+                        
+                        generate_argocd_app "$app_name" "$env" "$requirements_file" "$modules_file" > "$output_file"
+                        
+                        success "Generated: $output_file"
+                    fi
+                done
+            else
+                warn "No platform-requirements.yml found for $app_name, skipping..."
+                continue
+            fi
         fi
     done
-else
-    # Use provided local paths
-    REPOS=("$@")
-fi
+    
+    success "ArgoCD application generation completed!"
+}
 
-echo "🔍 Processing ${#REPOS[@]} repositories..."
-echo ""
-
-# Process each repository
-for repo in "${REPOS[@]}"; do
-    generate_argocd_for_repo "$repo"
-    echo ""
-done
-
-echo "🎉 ArgoCD application generation complete!"
-echo ""
-echo "📁 Generated applications in: $APPLICATIONS_DIR"
-echo ""
-echo "� Configuration Summary:"
-echo "  • Image Updater: $(if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then echo "✅ ENABLED - Automatic image updates active"; else echo "❌ DISABLED - Manual image updates required"; fi)"
-echo "  • Sync Policy: Dev=Auto, Staging=Manual, Production=Manual"
-echo ""
-echo "�🚀 Next steps:"
-echo "1. Review the generated ArgoCD applications"
-echo "2. Apply them to your cluster:"
-echo "   kubectl apply -f $APPLICATIONS_DIR/*/argocd/"
-echo "3. Check ArgoCD UI for application status"
-echo ""
-if [[ "$ENABLE_IMAGE_UPDATER" == "true" ]]; then
-    echo "� Image updates are ENABLED - ArgoCD will automatically update images every $DEFAULT_POLLING_INTERVAL"
-    echo "   • Strategy: $DEFAULT_UPDATE_STRATEGY"
-    echo "   • Tag Pattern: $DEFAULT_TAG_PATTERN"
-    echo "   • To disable automatic updates:"
-    echo "   ENABLE_IMAGE_UPDATER=false ./scripts/generate-argocd-applications.sh"
-else
-    echo "💡 Image updates are DISABLED - Manual image updates required."
-    echo "   To enable automatic image updates:"
-    echo "   ENABLE_IMAGE_UPDATER=true ./scripts/generate-argocd-applications.sh"
-fi
-echo ""
-echo "💡 To add a new application:"
-echo "1. Add the repository URL to application-sources.txt"
-echo "2. Run: cd config-repo && ./scripts/sync-app-repos.sh"
-echo "3. Run: ./scripts/generate-argocd-applications.sh ./local-app-repos/<app-name>"
+# Run main function
+main "$@"
