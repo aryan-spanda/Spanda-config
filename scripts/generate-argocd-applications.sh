@@ -145,10 +145,10 @@ generate_argocd_app() {
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: $app_name-$environment
+  name: $(echo "$app_name-$environment" | tr '[:upper:]' '[:lower:]')
   namespace: argocd
   labels:
-    app.kubernetes.io/name: $app_name
+    app.kubernetes.io/name: $(echo "$app_name" | tr '[:upper:]' '[:lower:]')
     app.kubernetes.io/part-of: spandaai-platform
     team: $team
     environment: $environment
@@ -158,13 +158,13 @@ metadata:
     app.spanda.ai/generator: "platform-automation"
     app.spanda.ai/generated-at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: $app_name=$container_org/$container_image
+    argocd-image-updater.argoproj.io/image-list: $(echo "$app_name" | tr '[:upper:]' '[:lower:]')=$container_org/$container_image
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
-    argocd-image-updater.argoproj.io/$app_name.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/$app_name.allow-tags: regexp:$image_tag_pattern
-    argocd-image-updater.argoproj.io/$app_name.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/$app_name.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').update-strategy: newest-build
+    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').allow-tags: regexp:$image_tag_pattern
+    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').helm.image-tag: image.tag
 spec:
   project: spanda-applications
   sources:

@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: Test-Application-dev
+  name: test-application-dev
   namespace: argocd
   labels:
-    app.kubernetes.io/name: Test-Application
+    app.kubernetes.io/name: test-application
     app.kubernetes.io/part-of: spandaai-platform
     team: development-team
     environment: dev
@@ -12,15 +12,15 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "platform-automation"
-    app.spanda.ai/generated-at: "2025-08-06T15:27:01Z"
+    app.spanda.ai/generated-at: "2025-08-06T16:04:51Z"
     # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: Test-Application=aryanpola/sample-application
+    argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
-    argocd-image-updater.argoproj.io/Test-Application.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/Test-Application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
-    argocd-image-updater.argoproj.io/Test-Application.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/Test-Application.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/test-application.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
+    argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/test-application.helm.image-tag: image.tag
 spec:
   project: spanda-applications
   sources:
