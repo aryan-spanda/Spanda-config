@@ -1,47 +1,47 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: test-application-production
+  name: sample-backend-staging
   namespace: argocd
   labels:
-    app.kubernetes.io/name: test-application
+    app.kubernetes.io/name: sample-backend
     app.kubernetes.io/part-of: spandaai-applications
-    team: development-team
-    environment: production
-    app-type: fullstack
+    team: backend-team
+    environment: staging
+    app-type: backend
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "simple-application-deployment"
-    app.spanda.ai/generated-at: "2025-08-08T06:18:19Z"
+    app.spanda.ai/generated-at: "2025-08-08T06:18:12Z"
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
+    argocd-image-updater.argoproj.io/image-list: sample-backend=aryanpola/sample-backend-api
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
-    argocd-image-updater.argoproj.io/git-branch: main
-    argocd-image-updater.argoproj.io/test-application.update-strategy: latest
-    argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^v[0-9]+\.[0-9]+\.[0-9]+$
-    argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/test-application.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/git-branch: staging
+    argocd-image-updater.argoproj.io/sample-backend.update-strategy: latest
+    argocd-image-updater.argoproj.io/sample-backend.allow-tags: regexp:^staging-[0-9a-f]{7,8}$
+    argocd-image-updater.argoproj.io/sample-backend.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/sample-backend.helm.image-tag: image.tag
 spec:
   project: spanda-applications
   source:
-    repoURL: https://github.com/aryan-spanda/Test-Application.git
-    targetRevision: main
+    repoURL: https://github.com/aryan-spanda/Sample-Backend.git
+    targetRevision: staging
     path: deploy/helm
     helm:
-      releaseName: test-application-production
+      releaseName: sample-backend-staging
       valueFiles:
-        - values-production.yaml
+        - values-staging.yaml
       parameters:
         - name: image.repository
-          value: aryanpola/sample-application
+          value: aryanpola/sample-backend-api
         - name: image.tag
-          value: v1.0.0
+          value: staging-placeholder
         - name: platform.servicesEnabled
           value: "true"
   destination:
     server: https://kubernetes.default.svc
-    namespace: test-application-production
+    namespace: sample-backend-staging
   syncPolicy:
     automated:
       selfHeal: true
@@ -61,6 +61,6 @@ spec:
     - name: 'Platform Services'
       value: 'Uses shared platform services'
     - name: 'Environment'
-      value: 'production'
+      value: 'staging'
     - name: 'Team'
-      value: 'development-team'
+      value: 'backend-team'
