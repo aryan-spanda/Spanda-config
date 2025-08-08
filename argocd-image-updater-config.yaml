@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-image-updater-config
+  namespace: argocd
+data:
+  registries.conf: |
+    registries:
+    - name: Docker Hub
+      api_url: https://registry-1.docker.io
+      prefix: docker.io
+      ping: yes
+      default: yes
+      
+  argocd.conf: |
+    argocd.server_addr: argocd-server.argocd.svc.cluster.local:443
+    argocd.insecure: false
+    argocd.grpc_web: true
+    
+  log.level: "info"
+  interval: "300s"
+  kube.events: "true"
+  kube.events.namespace: "argocd"
