@@ -208,7 +208,6 @@ data:
       api_url: https://registry-1.docker.io
       prefix: docker.io
       ping: yes
-      credentials: pullsecret:argocd/regcred
       default: yes
       
   argocd.conf: |

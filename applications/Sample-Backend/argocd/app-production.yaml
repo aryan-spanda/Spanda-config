@@ -12,7 +12,7 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "simple-application-deployment"
-    app.spanda.ai/generated-at: "2025-08-08T06:39:13Z"
+    app.spanda.ai/generated-at: "2025-08-08T06:51:20Z"
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: sample-backend=aryanpola/sample-backend-api
