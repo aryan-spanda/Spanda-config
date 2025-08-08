@@ -18,7 +18,7 @@ metadata:
     argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
-    argocd-image-updater.argoproj.io/test-application.update-strategy: semver
+    argocd-image-updater.argoproj.io/test-application.update-strategy: latest
     argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^testing-[0-9a-f]{7,8}$
     argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/test-application.helm.image-tag: image.tag
