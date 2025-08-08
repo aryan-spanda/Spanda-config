@@ -138,10 +138,12 @@ metadata:
     argocd-image-updater.argoproj.io/image-list: $(echo "$app_name" | tr '[:upper:]' '[:lower:]')=$container_org/$container_image
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
-    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').update-strategy: latest
+    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').update-strategy: semver
     argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').allow-tags: regexp:$image_tag_pattern
     argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').helm.image-name: image.repository
     argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').ignore-tags: latest,main
+    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').force-update: "false"
 spec:
   project: spanda-applications
   source:
@@ -187,6 +189,98 @@ spec:
 EOF
 }
 
+# Function to create and apply ArgoCD Image Updater configuration
+create_argocd_image_updater_config() {
+    log "Creating ArgoCD Image Updater configuration..."
+    
+    local config_file="$BASE_DIR/argocd-image-updater-config.yaml"
+    
+    cat << 'EOF' > "$config_file"
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-image-updater-config
+  namespace: argocd
+data:
+  registries.conf: |
+    registries:
+    - name: Docker Hub
+      api_url: https://registry-1.docker.io
+      prefix: docker.io
+      ping: yes
+      credentials: pullsecret:argocd/regcred
+      default: yes
+      
+  argocd.conf: |
+    argocd.server_addr: argocd-server.argocd.svc.cluster.local:443
+    argocd.insecure: false
+    argocd.grpc_web: true
+    
+  log.level: "info"
+  interval: "300s"
+  kube.events: "true"
+  kube.events.namespace: "argocd"
+EOF
+    
+    success "Created ArgoCD Image Updater config: $config_file"
+}
+
+# Function to apply all generated applications
+apply_applications() {
+    local auto_apply=${1:-false}
+    
+    if [[ "$auto_apply" != "true" ]]; then
+        echo ""
+        read -p "Do you want to apply the generated applications to Kubernetes? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log "Skipping application deployment"
+            return 0
+        fi
+    fi
+    
+    log "Applying ArgoCD Image Updater configuration..."
+    if kubectl apply -f "$BASE_DIR/argocd-image-updater-config.yaml"; then
+        success "ArgoCD Image Updater configuration applied"
+    else
+        error "Failed to apply ArgoCD Image Updater configuration"
+        return 1
+    fi
+    
+    log "Applying ArgoCD applications..."
+    local applied_count=0
+    local failed_count=0
+    
+    # Apply all application YAML files
+    for app_file in "$BASE_DIR/applications"/*/*/*.yaml; do
+        if [[ -f "$app_file" ]]; then
+            log "Applying: $(basename "$app_file")"
+            if kubectl apply -f "$app_file"; then
+                success "Applied: $(basename "$app_file")"
+                applied_count=$((applied_count + 1))
+            else
+                error "Failed to apply: $(basename "$app_file")"
+                failed_count=$((failed_count + 1))
+            fi
+        fi
+    done
+    
+    echo ""
+    if [[ $failed_count -eq 0 ]]; then
+        success "All applications applied successfully! ($applied_count applications)"
+    else
+        warn "Applied $applied_count applications, failed $failed_count"
+    fi
+    
+    # Restart ArgoCD Image Updater to pick up new config
+    log "Restarting ArgoCD Image Updater to apply new configuration..."
+    if kubectl rollout restart deployment/argocd-image-updater -n argocd; then
+        success "ArgoCD Image Updater restarted"
+    else
+        warn "Failed to restart ArgoCD Image Updater (may not be deployed yet)"
+    fi
+}
+
 # Function to show usage
 show_usage() {
     echo "Simple Application Generator v2.0"
@@ -196,18 +290,24 @@ show_usage() {
     echo "This script generates simple ArgoCD applications that consume"
     echo "existing platform services instead of provisioning modules."
     echo ""
+    echo "OPTIONS:"
+    echo "  --apply, -a     Automatically apply generated applications to Kubernetes"
+    echo "  --help, -h      Show this help message"
+    echo ""
     echo "Prerequisites:"
     echo "  - Platform services must be deployed first"
     echo "  - Use: ./deploy-platform-services.sh deploy"
     echo ""
     echo "Examples:"
-    echo "  $0              # Generate applications for all repos"
+    echo "  $0              # Generate applications (prompt to apply)"
+    echo "  $0 --apply      # Generate and auto-apply applications"
     echo ""
     echo "Generated applications will:"
     echo "  ✅ Use shared platform services"
     echo "  ✅ Deploy faster (no infrastructure provisioning)"
     echo "  ✅ Have simpler configuration"
-    echo "  ✅ Support image auto-updates"
+    echo "  ✅ Support conservative image auto-updates (5min polling)"
+    echo "  ✅ Include ArgoCD Image Updater configuration"
 }
 
 # Main function - simplified without platform modules
@@ -298,17 +398,30 @@ main() {
     echo ""
     success "Simple application generation completed!"
     log "Generated $env_count applications across $app_count repositories"
+    
+    # Create ArgoCD Image Updater configuration
+    create_argocd_image_updater_config
+    
     echo ""
     warn "📋 IMPORTANT: Platform services must be deployed first!"
     echo "   Run: ./deploy-platform-services.sh deploy"
     echo ""
-    log "🚀 To deploy applications:"
-    echo "   kubectl apply -f applications/"
+    
+    # Check for auto-apply flag
+    local auto_apply=false
+    if [[ "${1:-}" == "--apply" || "${1:-}" == "-a" ]]; then
+        auto_apply=true
+    fi
+    
+    # Apply applications
+    apply_applications "$auto_apply"
+    
     echo ""
     log "🎯 Applications will consume existing platform services"
     log "   - Faster deployment (no infrastructure provisioning)"
     log "   - Shared platform resources"
     log "   - Independent lifecycle management"
+    log "   - Conservative image update polling (5 minutes)"
 }
 
 # Run main function

@@ -12,16 +12,18 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "simple-application-deployment"
-    app.spanda.ai/generated-at: "2025-08-08T06:18:12Z"
+    app.spanda.ai/generated-at: "2025-08-08T06:39:13Z"
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: sample-backend=aryanpola/sample-backend-api
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: main
-    argocd-image-updater.argoproj.io/sample-backend.update-strategy: latest
+    argocd-image-updater.argoproj.io/sample-backend.update-strategy: semver
     argocd-image-updater.argoproj.io/sample-backend.allow-tags: regexp:^v[0-9]+\.[0-9]+\.[0-9]+$
     argocd-image-updater.argoproj.io/sample-backend.helm.image-name: image.repository
     argocd-image-updater.argoproj.io/sample-backend.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/sample-backend.ignore-tags: latest,main
+    argocd-image-updater.argoproj.io/sample-backend.force-update: "false"
 spec:
   project: spanda-applications
   source:
