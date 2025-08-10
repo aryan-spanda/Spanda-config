@@ -12,7 +12,7 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "simple-application-deployment"
-    app.spanda.ai/generated-at: "2025-08-08T07:09:06Z"
+    app.spanda.ai/generated-at: "2025-08-10T07:46:02Z"
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration
     argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
@@ -27,7 +27,7 @@ metadata:
 spec:
   project: spanda-applications
   source:
-    repoURL: https://github.com/aryan-spanda/Test-Application.git
+    repoURL: https://github.com/aryan-spanda/Test-Application
     targetRevision: main
     path: deploy/helm
     helm:

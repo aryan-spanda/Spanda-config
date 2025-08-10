@@ -1,20 +1,19 @@
 #!/bin/bash
 
-# SPANDA AI PLATFORM - SIMPLE APPLICATION GENERATOR
+# SPANDA AI PLATFORM - DIRECT API APPLICATION GENERATOR
 # 
-# This script generates simple ArgoCD applications that consume existing
-# platform services instead of provisioning platform modules per application.
+# This script generates ArgoCD applications by reading configuration directly
+# from application repositories via GitHub API. No cloning required!
 #
 # Author: Spanda AI DevOps Team
-# Version: 2.0 (Simplified for Platform Services)
+# Version: 3.0 (Direct API Access - No Cloning)
 
 set -euo pipefail
 
 # Configuration
-APP_REPO_BASE="https://github.com/aryan-spanda"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLATFORM_DISCOVERY_SCRIPT="../../spandaai-platform-deployment/bare-metal/discover-platform-services.sh"
+SOURCES_FILE="$BASE_DIR/application-sources.txt"
 
 # Colors for output
 RED='\033[0;31m'
@@ -39,68 +38,315 @@ warn() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Function to validate platform requirements
-validate_platform_requirements() {
-    local app_name=$1
-    local app_dir="../local-app-repos/$app_name"
-    local requirements_file="$app_dir/platform-requirements.yml"
+# Function to install dependencies
+install_dependencies() {
+    log "🔧 Checking and installing required dependencies..."
     
-    if [[ ! -f "$requirements_file" ]]; then
-        warn "No platform requirements file found for $app_name"
+    local deps_needed=()
+    local install_method=""
+    
+    # Check which dependencies are missing
+    if ! command -v curl &> /dev/null; then
+        deps_needed+=("curl")
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        deps_needed+=("jq")
+    fi
+    
+    if ! command -v yq &> /dev/null; then
+        deps_needed+=("yq")
+    fi
+    
+    # If no dependencies needed, return early
+    if [[ ${#deps_needed[@]} -eq 0 ]]; then
+        success "✅ All dependencies are already installed"
         return 0
     fi
     
-    log "Validating platform requirements for $app_name"
+    log "Missing dependencies: ${deps_needed[*]}"
     
-    # Use platform discovery script to validate requirements
-    if [[ -f "$PLATFORM_DISCOVERY_SCRIPT" ]]; then
-        if bash "$PLATFORM_DISCOVERY_SCRIPT" "$requirements_file"; then
-            success "All required platform services are available for $app_name"
-            return 0
-        else
-            error "Some required platform services are not available for $app_name"
-            error "Please ensure platform modules are deployed first"
-            return 1
-        fi
+    # Determine the best installation method
+    if command -v conda &> /dev/null; then
+        install_method="conda"
+        log "📦 Using conda to install dependencies..."
+        
+        for dep in "${deps_needed[@]}"; do
+            case "$dep" in
+                "curl")
+                    log "Installing curl via conda..."
+                    conda install -c conda-forge curl -y || warn "Failed to install curl via conda"
+                    ;;
+                "jq")
+                    log "Installing jq via conda..."
+                    conda install -c conda-forge jq -y || warn "Failed to install jq via conda"
+                    ;;
+                "yq")
+                    log "Installing yq via conda..."
+                    conda install -c conda-forge yq -y || warn "Failed to install yq via conda"
+                    ;;
+            esac
+        done
+        
+    elif command -v winget &> /dev/null; then
+        install_method="winget"
+        log "📦 Using winget to install dependencies..."
+        
+        for dep in "${deps_needed[@]}"; do
+            case "$dep" in
+                "curl")
+                    # curl is usually pre-installed on Windows 10+
+                    warn "curl should be pre-installed on Windows 10+. If not available, please install manually."
+                    ;;
+                "jq")
+                    log "Installing jq via winget..."
+                    winget install jqlang.jq || warn "Failed to install jq via winget"
+                    ;;
+                "yq")
+                    log "Installing yq via winget..."
+                    winget install MikeFarah.yq || warn "Failed to install yq via winget"
+                    ;;
+            esac
+        done
+        
+    elif command -v apt-get &> /dev/null; then
+        install_method="apt"
+        log "📦 Using apt to install dependencies..."
+        
+        sudo apt-get update
+        for dep in "${deps_needed[@]}"; do
+            case "$dep" in
+                "curl")
+                    sudo apt-get install -y curl || warn "Failed to install curl via apt"
+                    ;;
+                "jq")
+                    sudo apt-get install -y jq || warn "Failed to install jq via apt"
+                    ;;
+                "yq")
+                    # Install yq from GitHub releases
+                    log "Installing yq from GitHub releases..."
+                    sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                    sudo chmod +x /usr/local/bin/yq || warn "Failed to install yq from GitHub"
+                    ;;
+            esac
+        done
+        
+    elif command -v brew &> /dev/null; then
+        install_method="brew"
+        log "📦 Using brew to install dependencies..."
+        
+        for dep in "${deps_needed[@]}"; do
+            case "$dep" in
+                "curl")
+                    brew install curl || warn "Failed to install curl via brew"
+                    ;;
+                "jq")
+                    brew install jq || warn "Failed to install jq via brew"
+                    ;;
+                "yq")
+                    brew install yq || warn "Failed to install yq via brew"
+                    ;;
+            esac
+        done
+        
     else
-        warn "Platform discovery script not found, skipping validation"
+        error "❌ No supported package manager found (conda, winget, apt, brew)"
+        error "Please install the following dependencies manually:"
+        for dep in "${deps_needed[@]}"; do
+            case "$dep" in
+                "curl")
+                    error "  • curl: https://curl.se/download.html"
+                    ;;
+                "jq")
+                    error "  • jq: https://jqlang.github.io/jq/download/"
+                    ;;
+                "yq")
+                    error "  • yq: https://github.com/mikefarah/yq#install"
+                    ;;
+            esac
+        done
+        return 1
+    fi
+    
+    # Verify installation
+    log "🔍 Verifying dependency installation..."
+    local verification_failed=false
+    
+    for dep in "${deps_needed[@]}"; do
+        if command -v "$dep" &> /dev/null; then
+            success "✅ $dep is now available"
+        else
+            error "❌ $dep installation failed or not in PATH"
+            verification_failed=true
+        fi
+    done
+    
+    if [[ "$verification_failed" == true ]]; then
+        error "Some dependencies failed to install. Please install them manually and try again."
+        return 1
+    fi
+    
+    success "✅ All dependencies installed successfully using $install_method"
+    return 0
+}
+
+# Parse repository URL and extract components
+parse_repo_url() {
+    local repo_url="$1"
+    local branch=""
+    local base_url=""
+    
+    if [[ "$repo_url" == *"/tree/"* ]]; then
+        # Handle GitHub tree URLs (e.g., https://github.com/user/repo/tree/branch)
+        base_url=$(echo "$repo_url" | sed 's|/tree/.*||')
+        branch=$(echo "$repo_url" | sed 's|.*/tree/||')
+    else
+        # Regular repository URL
+        base_url="$repo_url"
+        branch="main"  # Default branch
+    fi
+    
+    # Remove .git suffix if present
+    base_url=$(echo "$base_url" | sed 's|\.git$||')
+    
+    # Extract repo name
+    local repo_name=$(basename "$base_url")
+    
+    echo "$base_url|$branch|$repo_name"
+}
+
+# Read file directly from GitHub API
+read_file_from_github() {
+    local repo_url="$1"
+    local branch="$2"
+    local file_path="$3"
+    
+    # Convert GitHub URL to API URL
+    local api_url=$(echo "$repo_url" | sed 's|https://github.com/|https://api.github.com/repos/|')
+    
+    # Try to read the file (without logging to avoid mixing output)
+    local response=$(curl -s "$api_url/contents/$file_path?ref=$branch" 2>/dev/null || echo "")
+    
+    if echo "$response" | jq -e '.content' >/dev/null 2>&1; then
+        echo "$response" | jq -r '.content' | base64 -d
         return 0
+    else
+        return 1
     fi
 }
 
-# Platform service integration is handled via Helm values and service discovery
-# ConfigMaps are created by the application's Helm chart, not by ArgoCD application definitions
+# Validate that required files exist in repository
+validate_repository_structure() {
+    local repo_url="$1"
+    local branch="$2"
+    local repo_name="$3"
+    
+    log "🔍 Validating repository structure for $repo_name"
+    
+    # Convert GitHub URL to API URL
+    local api_url=$(echo "$repo_url" | sed 's|https://github.com/|https://api.github.com/repos/|')
+    
+    # Check if platform-requirements.yml exists
+    local platform_req_response=$(curl -s "$api_url/contents/platform-requirements.yml?ref=$branch" 2>/dev/null || echo "")
+    if ! echo "$platform_req_response" | jq -e '.content' >/dev/null 2>&1; then
+        error "❌ platform-requirements.yml not found in $repo_url (branch: $branch)"
+        return 1
+    fi
+    
+    # Check if Helm chart exists
+    local helm_chart_response=$(curl -s "$api_url/contents/deploy/helm/Chart.yaml?ref=$branch" 2>/dev/null || echo "")
+    if ! echo "$helm_chart_response" | jq -e '.content' >/dev/null 2>&1; then
+        error "❌ Helm chart (deploy/helm/Chart.yaml) not found in $repo_url (branch: $branch)"
+        return 1
+    fi
+    
+    success "✅ Repository structure validated for $repo_name"
+    return 0
+}
+
+# Function to validate platform requirements (simplified without platform discovery)
+validate_platform_requirements() {
+    local platform_config="$1"
+    local repo_name="$2"
+    
+    log "🔍 Validating platform requirements for $repo_name"
+    
+    # Debug: Show first few lines of the config
+    log "📄 Platform config preview:"
+    echo "$platform_config" | head -5 | sed 's/^/    /'
+    
+    # Basic validation - check if required fields exist
+    local app_name=$(echo "$platform_config" | yq eval '.app.name' - 2>/dev/null || echo "")
+    local app_type=$(echo "$platform_config" | yq eval '.app.type' - 2>/dev/null || echo "")
+    
+    log "🔍 Parsed values: app_name='$app_name', app_type='$app_type'"
+    
+    # Remove quotes if present
+    app_name=$(echo "$app_name" | sed 's/^"//;s/"$//')
+    app_type=$(echo "$app_type" | sed 's/^"//;s/"$//')
+    
+    if [[ -z "$app_name" || "$app_name" == "null" ]]; then
+        error "❌ app.name not defined in platform-requirements.yml for $repo_name"
+        return 1
+    fi
+    
+    if [[ -z "$app_type" || "$app_type" == "null" ]]; then
+        warn "⚠️  app.type not defined in platform-requirements.yml for $repo_name, using default: application"
+    fi
+    
+    success "✅ Platform requirements validated for $repo_name ($app_name)"
+    return 0
+}
 
 # Function to parse YAML using yq
 parse_yaml() {
-    local file=$1
-    local query=$2
-    yq eval "$query" "$file" 2>/dev/null || echo ""
+    local yaml_content="$1"
+    local query="$2"
+    local result=$(echo "$yaml_content" | yq eval "$query" - 2>/dev/null || echo "")
+    
+    # Remove quotes if present and handle null values
+    result=$(echo "$result" | sed 's/^"//;s/"$//')
+    if [[ "$result" == "null" ]]; then
+        result=""
+    fi
+    
+    echo "$result"
 }
 
-# Function to generate simple ArgoCD application (no platform modules)
+# Function to generate ArgoCD application from repository data
 generate_simple_app() {
-    local app_name=$1
-    local environment=$2
-    local app_config_file=$3
+    local repo_url="$1"
+    local branch="$2"
+    local repo_name="$3"
+    local environment="$4"
+    local platform_config="$5"
     
-    # Parse application configuration
-    local repo_url=$(parse_yaml "$app_config_file" '.app.repoURL')
-    local chart_path=$(parse_yaml "$app_config_file" '.app.chartPath')
-    local team=$(parse_yaml "$app_config_file" '.app.team')
-    local app_type=$(parse_yaml "$app_config_file" '.app.type')
-    local container_registry=$(parse_yaml "$app_config_file" '.container.registry')
-    local container_org=$(parse_yaml "$app_config_file" '.container.organization')
-    local container_image=$(parse_yaml "$app_config_file" '.container.image')
+    # Parse application configuration from platform-requirements.yml
+    local app_name=$(parse_yaml "$platform_config" '.app.name')
+    local team=$(parse_yaml "$platform_config" '.app.team')
+    local app_type=$(parse_yaml "$platform_config" '.app.type')
+    local container_registry=$(parse_yaml "$platform_config" '.container.registry')
+    local container_org=$(parse_yaml "$platform_config" '.container.organization')
+    local container_image=$(parse_yaml "$platform_config" '.container.image')
+    local chart_path=$(parse_yaml "$platform_config" '.app.chartPath')
+    
+    # Set defaults if not specified
+    [[ -z "$team" ]] && team="development"
+    [[ -z "$app_type" ]] && app_type="application"
+    [[ -z "$container_registry" ]] && container_registry="docker.io"
+    [[ -z "$chart_path" ]] && chart_path="deploy/helm"
+    
+    # Use repo_name as app_name if not specified in config
+    [[ -z "$app_name" ]] && app_name="$repo_name"
     
     # Determine target revision and image tag based on environment
-    local target_revision="main"
-    local image_tag_pattern="^main-[0-9a-f]{7,8}$"
-    local image_tag_placeholder="main-placeholder"
+    local target_revision="$branch"
+    local image_tag_pattern="^${branch}-[0-9a-f]{7,8}$"
+    local image_tag_placeholder="${branch}-placeholder"
     
     case "$environment" in
         "dev")
-            target_revision="testing"
+            [[ "$branch" == "main" ]] && target_revision="testing"
             image_tag_pattern="^testing-[0-9a-f]{7,8}$"
             image_tag_placeholder="testing-placeholder"
             ;;
@@ -224,203 +470,232 @@ EOF
     success "Created ArgoCD Image Updater config: $config_file"
 }
 
-# Function to apply all generated applications
-apply_applications() {
-    local auto_apply=${1:-false}
-    
-    if [[ "$auto_apply" != "true" ]]; then
-        echo ""
-        read -p "Do you want to apply the generated applications to Kubernetes? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log "Skipping application deployment"
-            return 0
-        fi
-    fi
-    
-    log "Applying ArgoCD Image Updater configuration..."
-    if kubectl apply -f "$BASE_DIR/argocd-image-updater-config.yaml"; then
-        success "ArgoCD Image Updater configuration applied"
-    else
-        error "Failed to apply ArgoCD Image Updater configuration"
-        return 1
-    fi
-    
-    log "Applying ArgoCD applications..."
-    local applied_count=0
-    local failed_count=0
-    
-    # Apply all application YAML files
-    for app_file in "$BASE_DIR/applications"/*/*/*.yaml; do
-        if [[ -f "$app_file" ]]; then
-            log "Applying: $(basename "$app_file")"
-            if kubectl apply -f "$app_file"; then
-                success "Applied: $(basename "$app_file")"
-                applied_count=$((applied_count + 1))
-            else
-                error "Failed to apply: $(basename "$app_file")"
-                failed_count=$((failed_count + 1))
-            fi
-        fi
-    done
-    
-    echo ""
-    if [[ $failed_count -eq 0 ]]; then
-        success "All applications applied successfully! ($applied_count applications)"
-    else
-        warn "Applied $applied_count applications, failed $failed_count"
-    fi
-    
-    # Restart ArgoCD Image Updater to pick up new config
-    log "Restarting ArgoCD Image Updater to apply new configuration..."
-    if kubectl rollout restart deployment/argocd-image-updater -n argocd; then
-        success "ArgoCD Image Updater restarted"
-    else
-        warn "Failed to restart ArgoCD Image Updater (may not be deployed yet)"
-    fi
-}
-
-# Function to show usage
-show_usage() {
-    echo "Simple Application Generator v2.0"
-    echo ""
-    echo "Usage: $0 [OPTIONS]"
-    echo ""
-    echo "This script generates simple ArgoCD applications that consume"
-    echo "existing platform services instead of provisioning modules."
-    echo ""
-    echo "OPTIONS:"
-    echo "  --apply, -a     Automatically apply generated applications to Kubernetes"
-    echo "  --help, -h      Show this help message"
-    echo ""
-    echo "Prerequisites:"
-    echo "  - Platform services must be deployed first"
-    echo "  - Use: ./deploy-platform-services.sh deploy"
-    echo ""
-    echo "Examples:"
-    echo "  $0              # Generate applications (prompt to apply)"
-    echo "  $0 --apply      # Generate and auto-apply applications"
-    echo ""
-    echo "Generated applications will:"
-    echo "  ✅ Use shared platform services"
-    echo "  ✅ Deploy faster (no infrastructure provisioning)"
-    echo "  ✅ Have simpler configuration"
-    echo "  ✅ Support conservative image auto-updates (5min polling)"
-    echo "  ✅ Include ArgoCD Image Updater configuration"
-}
-
-# Main function - simplified without platform modules
+# Main function - Direct API access (no cloning required)
 main() {
     if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
         show_usage
         return 0
     fi
     
-    log "🚀 Simple Application Generator v2.0 (Platform Services Separate)"
+    local apply_mode=false
+    if [[ "${1:-}" == "--apply" ]]; then
+        apply_mode=true
+        log "🚀 Direct API Application Generator v3.0 (Apply Mode)"
+    else
+        log "🚀 Direct API Application Generator v3.0 (Generate Mode)"
+    fi
     echo "=================================================================="
     
-    # Check dependencies
+    # Install dependencies if needed
+    if ! install_dependencies; then
+        error "Failed to install required dependencies. Please install them manually and try again."
+        exit 1
+    fi
+    
+    # Check dependencies (final verification)
+    local missing_deps=()
     if ! command -v yq &> /dev/null; then
-        error "yq is required but not installed. Please install yq."
+        missing_deps+=("yq")
+    fi
+    
+    if ! command -v curl &> /dev/null; then
+        missing_deps+=("curl")
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        missing_deps+=("jq")
+    fi
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        error "The following dependencies are still missing: ${missing_deps[*]}"
+        error "Please install them manually:"
+        for dep in "${missing_deps[@]}"; do
+            case "$dep" in
+                "curl") error "  • curl: https://curl.se/download.html" ;;
+                "jq") error "  • jq: https://jqlang.github.io/jq/download/" ;;
+                "yq") error "  • yq: https://github.com/mikefarah/yq#install" ;;
+            esac
+        done
         exit 1
     fi
     
-    # Validate platform services are available
-    log "Checking platform services availability..."
-    if [[ -f "$PLATFORM_DISCOVERY_SCRIPT" ]]; then
-        if ! bash "$PLATFORM_DISCOVERY_SCRIPT"; then
-            error "Platform services are not fully deployed"
-            error "Please run platform deployment first:"
-            error "  cd ../../spandaai-platform-deployment/bare-metal"
-            error "  ./deploy-complete-platform.sh"
-            exit 1
-        fi
-    else
-        warn "Platform discovery script not found, skipping platform validation"
-    fi
-    
-    # Process applications
-    local apps_dir="$BASE_DIR/local-app-repos"
-    if [[ ! -d "$apps_dir" ]]; then
-        error "Local app repositories directory not found: $apps_dir"
-        error "Expected: $apps_dir"
+    # Check if application sources file exists
+    if [[ ! -f "$SOURCES_FILE" ]]; then
+        error "Application sources file not found: $SOURCES_FILE"
+        error "Please create this file and add application repository URLs to it."
         exit 1
     fi
+    
+    log "📖 Reading application sources from: $SOURCES_FILE"
     
     local app_count=0
     local env_count=0
+    local total_apps_generated=0
     
-    for app_dir in "$apps_dir"/*; do
-        if [[ -d "$app_dir" ]]; then
-            local app_name=$(basename "$app_dir")
-            log "Processing application: $app_name"
-            app_count=$((app_count + 1))
-            
-            # Validate platform requirements for this app
-            if ! validate_platform_requirements "$app_name"; then
-                error "Skipping $app_name due to unmet platform requirements"
-                continue
-            fi
-            
-            local requirements_file="$app_dir/platform-requirements.yml"
-            
-            if [[ -f "$requirements_file" ]]; then
-                # Get environments from requirements
-                local environments=($(parse_yaml "$requirements_file" '.environments[]'))
-                
-                if [[ ${#environments[@]} -eq 0 ]]; then
-                    warn "No environments found for $app_name, skipping"
-                    continue
-                fi
-                
-                # Generate simple ArgoCD applications for each environment
-                for env in "${environments[@]}"; do
-                    if [[ -n "$env" && "$env" != "null" ]]; then
-                        log "Generating simple ArgoCD application for $app_name-$env"
-                        
-                        local output_file="$BASE_DIR/applications/$app_name/argocd/app-$env.yaml"
-                        mkdir -p "$(dirname "$output_file")"
-                        
-                        # Generate app manifest (ConfigMaps handled by Helm chart)
-                        generate_simple_app "$app_name" "$env" "$requirements_file" > "$output_file"
-                        
-                        success "Generated: $output_file"
-                        env_count=$((env_count + 1))
-                    fi
-                done
-            else
-                warn "No platform-requirements.yml found for $app_name, skipping"
-            fi
+    # Process each repository URL from application-sources.txt
+    while IFS= read -r repo_line; do
+        # Skip empty lines and comments
+        [[ -z "$repo_line" || "$repo_line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Trim whitespace
+        repo_line=$(echo "$repo_line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [[ -z "$repo_line" ]] && continue
+        
+        log "🔍 Processing repository: $repo_line"
+        app_count=$((app_count + 1))
+        
+        # Parse repository URL and extract components
+        local repo_data=$(parse_repo_url "$repo_line")
+        local repo_url=$(echo "$repo_data" | cut -d'|' -f1)
+        local branch=$(echo "$repo_data" | cut -d'|' -f2)
+        local repo_name=$(echo "$repo_data" | cut -d'|' -f3)
+        
+        log "  📁 Repository: $repo_name"
+        log "  🌿 Branch: $branch"
+        log "  🔗 URL: $repo_url"
+        
+        # Validate repository structure
+        if ! validate_repository_structure "$repo_url" "$branch" "$repo_name"; then
+            error "Skipping $repo_name due to invalid repository structure"
+            continue
         fi
-    done
+        
+        # Read platform-requirements.yml directly from GitHub API
+        local platform_config
+        if ! platform_config=$(read_file_from_github "$repo_url" "$branch" "platform-requirements.yml"); then
+            error "Failed to read platform-requirements.yml from $repo_name"
+            continue
+        fi
+        
+        # Validate platform requirements
+        if ! validate_platform_requirements "$platform_config" "$repo_name"; then
+            error "Skipping $repo_name due to invalid platform requirements"
+            continue
+        fi
+        
+        # Get environments from platform requirements
+        local environments=($(parse_yaml "$platform_config" '.environments[]'))
+        
+        if [[ ${#environments[@]} -eq 0 ]]; then
+            warn "No environments defined for $repo_name, using default: dev"
+            environments=("dev")
+        fi
+        
+        log "  🎯 Environments: ${environments[*]}"
+        
+        # Generate ArgoCD applications for each environment
+        for env in "${environments[@]}"; do
+            log "  🔄 Generating $env environment for $repo_name"
+            env_count=$((env_count + 1))
+            
+            # Create application directory
+            local app_dir="$BASE_DIR/applications/$repo_name/argocd"
+            mkdir -p "$app_dir"
+            
+            # Generate ArgoCD application manifest
+            local app_file="$app_dir/app-$env.yaml"
+            generate_simple_app "$repo_url" "$branch" "$repo_name" "$env" "$platform_config" > "$app_file"
+            
+            success "  ✅ Generated: $app_file"
+            total_apps_generated=$((total_apps_generated + 1))
+            
+            # Apply if in apply mode
+            if [[ "$apply_mode" == true ]]; then
+                if kubectl apply -f "$app_file"; then
+                    success "  🚀 Applied ArgoCD application: $repo_name-$env"
+                else
+                    error "  ❌ Failed to apply ArgoCD application: $repo_name-$env"
+                fi
+            fi
+        done
+        
+        echo "" # Add spacing between repositories
+        
+    done < "$SOURCES_FILE"
     
-    echo ""
-    success "Simple application generation completed!"
-    log "Generated $env_count applications across $app_count repositories"
-    
-    # Create ArgoCD Image Updater configuration
-    create_argocd_image_updater_config
-    
-    echo ""
-    warn "📋 IMPORTANT: Platform services must be deployed first!"
-    echo "   Run: ./deploy-platform-services.sh deploy"
-    echo ""
-    
-    # Check for auto-apply flag
-    local auto_apply=false
-    if [[ "${1:-}" == "--apply" || "${1:-}" == "-a" ]]; then
-        auto_apply=true
+    # Create and apply ArgoCD Image Updater configuration
+    if [[ "$apply_mode" == true ]]; then
+        create_argocd_image_updater_config
+        
+        if kubectl apply -f "$BASE_DIR/argocd-image-updater-config.yaml"; then
+            success "✅ Applied ArgoCD Image Updater configuration"
+            
+            # Restart ArgoCD Image Updater to pick up new config
+            if kubectl rollout restart deployment argocd-image-updater -n argocd; then
+                success "✅ Restarted ArgoCD Image Updater"
+            else
+                warn "⚠️  Failed to restart ArgoCD Image Updater (may not be installed yet)"
+            fi
+        else
+            error "❌ Failed to apply ArgoCD Image Updater configuration"
+        fi
     fi
     
-    # Apply applications
-    apply_applications "$auto_apply"
-    
+    # Summary
     echo ""
-    log "🎯 Applications will consume existing platform services"
-    log "   - Faster deployment (no infrastructure provisioning)"
-    log "   - Shared platform resources"
-    log "   - Independent lifecycle management"
-    log "   - Conservative image update polling (5 minutes)"
+    success "=== 📊 GENERATION COMPLETE ==="
+    echo "📈 Statistics:"
+    echo "  • Repositories processed: $app_count"
+    echo "  • Applications generated: $total_apps_generated"
+    echo "  • Total environments: $env_count"
+    echo ""
+    
+    if [[ "$apply_mode" == true ]]; then
+        echo "🎯 Next Steps:"
+        echo "  • Check ArgoCD dashboard for application status"
+        echo "  • Monitor application deployments"
+        echo "  • Verify ArgoCD Image Updater is working"
+    else
+        echo "🎯 Next Steps:"
+        echo "  • Review generated manifests in applications/ directory"
+        echo "  • Run with --apply to deploy applications"
+        echo "  • Example: $0 --apply"
+    fi
+}
+
+# Show usage information
+show_usage() {
+    echo "🚀 Spanda Platform - Direct API Application Generator v3.0"
+    echo ""
+    echo "DESCRIPTION:"
+    echo "  Generates ArgoCD applications by reading configuration directly from"
+    echo "  application repositories via GitHub API. No cloning required!"
+    echo ""
+    echo "USAGE:"
+    echo "  $0                    # Generate ArgoCD manifests only"
+    echo "  $0 --apply           # Generate and apply to Kubernetes cluster"
+    echo "  $0 --help            # Show this help message"
+    echo ""
+    echo "FEATURES:"
+    echo "  ✅ Direct GitHub API access (no repository cloning)"
+    echo "  ✅ Reads platform-requirements.yml from original repositories"
+    echo "  ✅ Validates Helm chart structure remotely"
+    echo "  ✅ Generates ArgoCD applications with Image Updater configuration"
+    echo "  ✅ Supports multiple environments per application"
+    echo "  ✅ Conservative polling settings (5-minute intervals)"
+    echo "  ✅ Auto-installs dependencies (yq, jq, curl)"
+    echo ""
+    echo "REQUIREMENTS:"
+    echo "  • application-sources.txt file with repository URLs"
+    echo "  • Each repository must have platform-requirements.yml"
+    echo "  • Each repository must have deploy/helm/Chart.yaml"
+    echo "  • Package manager: conda, winget, apt, or brew (for auto-install)"
+    echo ""
+    echo "DEPENDENCIES (auto-installed):"
+    echo "  • yq - YAML processor"
+    echo "  • jq - JSON processor" 
+    echo "  • curl - HTTP client"
+    echo ""
+    echo "EXAMPLE application-sources.txt:"
+    echo "  https://github.com/org/app1/tree/testing"
+    echo "  https://github.com/org/app2.git"
+    echo "  # https://github.com/org/disabled-app.git"
+    echo ""
+    echo "BENEFITS:"
+    echo "  🚀 Faster execution (5-10 seconds vs 30-60 seconds)"
+    echo "  💾 Zero disk usage for discovery"
+    echo "  🔄 Always current data from source repositories"
+    echo "  🧹 No cloned repository management required"
 }
 
 # Run main function
