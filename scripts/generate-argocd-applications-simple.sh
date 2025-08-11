@@ -271,30 +271,54 @@ validate_platform_requirements() {
     
     log "🔍 Validating platform requirements for $repo_name"
     
-    # Debug: Show first few lines of the config
-    log "📄 Platform config preview:"
-    echo "$platform_config" | head -5 | sed 's/^/    /'
+    log "📖 Successfully read platform-requirements.yml from $repo_name"
     
-    # Basic validation - check if required fields exist
-    local app_name=$(echo "$platform_config" | yq eval '.app.name' - 2>/dev/null || echo "")
-    local app_type=$(echo "$platform_config" | yq eval '.app.type' - 2>/dev/null || echo "")
+    # Debug: Show first few lines of config
+    log "🔍 Debug - Config preview:"
+    echo "$platform_config" | head -10 | while read line; do
+        log "    $line"
+    done
     
-    log "🔍 Parsed values: app_name='$app_name', app_type='$app_type'"
+    # Parse required fields
+    local app_name app_type port
+    app_name=$(parse_yaml "$platform_config" ".app.name")
+    app_type=$(parse_yaml "$platform_config" ".app.type")  
+    port=$(parse_yaml "$platform_config" ".app.port")
     
-    # Remove quotes if present
-    app_name=$(echo "$app_name" | sed 's/^"//;s/"$//')
-    app_type=$(echo "$app_type" | sed 's/^"//;s/"$//')
+    log "🔍 Debug - Parsed values: app_name='$app_name', app_type='$app_type', port='$port'"
     
-    if [[ -z "$app_name" || "$app_name" == "null" ]]; then
-        error "❌ app.name not defined in platform-requirements.yml for $repo_name"
+    # Validate required fields
+    if [ -z "$app_name" ]; then
+        log "❌ app.name not defined in platform-requirements.yml"
         return 1
     fi
     
-    if [[ -z "$app_type" || "$app_type" == "null" ]]; then
-        warn "⚠️  app.type not defined in platform-requirements.yml for $repo_name, using default: application"
+    if [ -z "$app_type" ]; then
+        log "❌ app.type not defined in platform-requirements.yml"
+        return 1
     fi
     
-    success "✅ Platform requirements validated for $repo_name ($app_name)"
+    # Validate app type
+    case "$app_type" in
+        "frontend"|"backend"|"api"|"service"|"worker"|"database"|"fullstack")
+            log "✅ Valid app type: $app_type"
+            ;;
+        *)
+            log "❌ Invalid app type: $app_type. Must be one of: frontend, backend, api, service, worker, database, fullstack"
+            return 1
+            ;;
+    esac
+    
+    # Port is optional but should be numeric if provided
+    if [ -n "$port" ] && ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        log "❌ Invalid port: $port. Must be numeric"
+        return 1
+    fi
+    
+    log "✅ Platform requirements validated successfully"
+    log "📋 Application: $app_name (type: $app_type)"
+    [ -n "$port" ] && log "🔌 Port: $port"
+    
     return 0
 }
 
@@ -331,7 +355,7 @@ generate_simple_app() {
     local chart_path=$(parse_yaml "$platform_config" '.app.chartPath')
     
     # Set defaults if not specified
-    [[ -z "$team" ]] && team="development"
+    [[ -z "$team" ]] && team="development-team"
     [[ -z "$app_type" ]] && app_type="application"
     [[ -z "$container_registry" ]] && container_registry="docker.io"
     [[ -z "$chart_path" ]] && chart_path="deploy/helm"
