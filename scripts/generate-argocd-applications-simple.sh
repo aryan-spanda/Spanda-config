@@ -461,10 +461,14 @@ generate_helm_parameters() {
     
     for service in "${services[@]}"; do
         cat << EOF
-        - name: ${service}.image.repository
+        - name: frontend.image.repository
           value: ${container_org}/${container_image}
-        - name: ${service}.image.tag
-          value: ${service}-${image_tag_placeholder}
+        - name: frontend.image.tag
+          value: frontend-${image_tag_placeholder}
+        - name: backend.image.repository
+          value: ${container_org}/${container_image}
+        - name: backend.image.tag
+          value: backend-${image_tag_placeholder}
 EOF
     done
 }
@@ -520,21 +524,21 @@ generate_simple_app() {
     case "$environment" in
         "dev")
             [[ "$branch" == "main" ]] && target_revision="testing"
-            image_tag_pattern="testing-(latest|[0-9a-f]{7,8})$"
-            image_tag_placeholder="testing-placeholder"
-            ignore_tags="frontend-latest,frontend-main,backend-latest,backend-main"
+            image_tag_pattern="testing-latest$"
+            image_tag_placeholder="testing-latest"
+            ignore_tags="frontend-main-latest,frontend-staging-latest,backend-main-latest,backend-staging-latest"
             ;;
         "staging")
             target_revision="staging"
-            image_tag_pattern="staging-(latest|[0-9a-f]{7,8})$"
-            image_tag_placeholder="staging-placeholder"
-            ignore_tags="frontend-latest,frontend-main,backend-latest,backend-main"
+            image_tag_pattern="staging-latest$"
+            image_tag_placeholder="staging-latest"
+            ignore_tags="frontend-main-latest,frontend-testing-latest,backend-main-latest,backend-testing-latest"
             ;;
         "production")
             target_revision="main"
-            image_tag_pattern="(latest|main-latest|main-[0-9a-f]{7,8}|v[0-9]+\\\\.[0-9]+\\\\.[0-9]+)$"
-            image_tag_placeholder="v1.0.0"
-            ignore_tags="frontend-testing,frontend-staging,backend-testing,backend-staging"
+            image_tag_pattern="main-latest$"
+            image_tag_placeholder="main-latest"
+            ignore_tags="frontend-testing-latest,frontend-staging-latest,backend-testing-latest,backend-staging-latest"
             ;;
     esac
     

@@ -20,17 +20,17 @@ metadata:
     argocd-image-updater.argoproj.io/git-branch: testing
     # Frontend image configuration
     argocd-image-updater.argoproj.io/frontend.update-strategy: latest
-    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-testing-(latest|[0-9a-f]{7,8})$
+    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-testing-latest$
     argocd-image-updater.argoproj.io/frontend.helm.image-name: frontend.image.repository
     argocd-image-updater.argoproj.io/frontend.helm.image-tag: frontend.image.tag
-    argocd-image-updater.argoproj.io/frontend.ignore-tags: frontend-latest,frontend-main
+    argocd-image-updater.argoproj.io/frontend.ignore-tags: frontend-main-latest,frontend-staging-latest
     argocd-image-updater.argoproj.io/frontend.force-update: "false"
     # Backend image configuration
     argocd-image-updater.argoproj.io/backend.update-strategy: latest
-    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-testing-(latest|[0-9a-f]{7,8})$
+    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-testing-latest$
     argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
     argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
-    argocd-image-updater.argoproj.io/backend.ignore-tags: backend-latest,backend-main
+    argocd-image-updater.argoproj.io/backend.ignore-tags: backend-main-latest,backend-staging-latest
     argocd-image-updater.argoproj.io/backend.force-update: "false"
 spec:
   project: spanda-applications
@@ -47,11 +47,11 @@ spec:
         - name: frontend.image.repository
           value: aryanpola/sample-application
         - name: frontend.image.tag
-          value: frontend-testing-placeholder
+          value: frontend-testing-latest
         - name: backend.image.repository
           value: aryanpola/sample-application
         - name: backend.image.tag
-          value: backend-testing-placeholder
+          value: backend-testing-latest
         - name: platform.servicesEnabled
           value: "true"
   destination:
