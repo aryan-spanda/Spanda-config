@@ -1,13 +1,23 @@
 #!/bin/bash
 
-# SPANDA AI PLATFORM - DIRECT API APPLICATION GENERATOR
+# SPANDA AI PLATFORM - DYNAMIC MICROSERVICES ARGOCD GENERATOR
 # 
 # This script generates ArgoCD applications by reading configuration directly
-# from application repositories via GitHub API. No cloning required!
+# from application repositories via GitHub API. Supports unlimited microservices!
+#
+# Expected CI/CD Image Tags:
+# - <service>-latest (global latest for any branch)
+# - <service>-<branch>-latest (branch-specific latest)
+# - <service>-<branch>-<sha> (specific commit builds)
+# - <service>-<sha> (sha-only builds)
+#
+# Environment Tag Patterns:
+# - dev: Tracks testing branch images (frontend-testing-latest, backend-testing-latest)
+# - staging: Tracks staging branch images (frontend-staging-latest, backend-staging-latest)  
+# - production: Tracks main branch images (frontend-latest, frontend-main-latest)
 #
 # Author: Spanda AI DevOps Team
-# Version: 3.0 (Direct API Access - No Cloning)
-
+# Version: 4.0 (Dynamic N-Microservices + Branch-Specific Tags)    echo -e "🚀 Spanda Platform - Dynamic Microservices Generator v4.0"
 set -euo pipefail
 
 # Configuration
@@ -337,7 +347,129 @@ parse_yaml() {
     echo "$result"
 }
 
-# Function to generate ArgoCD application from repository data
+# Function to discover microservices dynamically from repository structure
+discover_microservices() {
+    local repo_url="$1"
+    local branch="$2"
+    local repo_name="$3"
+    local platform_config="$4"
+    
+    log "🔍 Discovering microservices in $repo_name"
+    
+    # First check if microservices are explicitly defined in platform-requirements.yml
+    local explicit_services=$(parse_yaml "$platform_config" '.microservices[].name' 2>/dev/null || echo "")
+    if [[ -n "$explicit_services" ]]; then
+        log "📋 Using explicitly defined microservices from platform-requirements.yml"
+        echo "$explicit_services"
+        return 0
+    fi
+    
+    # Convert GitHub URL to API URL
+    local api_url=$(echo "$repo_url" | sed 's|https://github.com/|https://api.github.com/repos/|')
+    
+    # Get src directory contents
+    local src_response=$(curl -s "$api_url/contents/src?ref=$branch" 2>/dev/null || echo "[]")
+    
+    # Check if src directory exists and has content
+    if ! echo "$src_response" | jq -e '.[] | select(.type=="dir")' >/dev/null 2>&1; then
+        log "📁 No src/ directory found, assuming single-service application"
+        echo "app"  # Default single service name
+        return 0
+    fi
+    
+    # Extract directory names from src/
+    local microservices=()
+    while IFS= read -r service; do
+        if [[ -n "$service" && "$service" != "shared" ]]; then
+            # Check if this directory contains a Dockerfile
+            local dockerfile_check=$(curl -s "$api_url/contents/src/$service/Dockerfile?ref=$branch" 2>/dev/null || echo "")
+            if echo "$dockerfile_check" | jq -e '.content' >/dev/null 2>&1; then
+                microservices+=("$service")
+                log "✅ Found microservice: $service (has Dockerfile)"
+            else
+                log "⚠️  Directory $service exists but no Dockerfile found, skipping"
+            fi
+        fi
+    done < <(echo "$src_response" | jq -r '.[] | select(.type=="dir") | .name')
+    
+    # If no microservices found with Dockerfiles, check for single Dockerfile at root
+    if [[ ${#microservices[@]} -eq 0 ]]; then
+        local root_dockerfile=$(curl -s "$api_url/contents/Dockerfile?ref=$branch" 2>/dev/null || echo "")
+        if echo "$root_dockerfile" | jq -e '.content' >/dev/null 2>&1; then
+            log "📦 Single-service application detected (root Dockerfile)"
+            echo "app"
+            return 0
+        else
+            error "❌ No Dockerfiles found in src/ directories or root"
+            return 1
+        fi
+    fi
+    
+    log "🎯 Discovered ${#microservices[@]} microservices: ${microservices[*]}"
+    printf '%s\n' "${microservices[@]}"
+    return 0
+}
+
+# Function to generate dynamic image list for ArgoCD Image Updater
+generate_image_list() {
+    local services=("$@")
+    local container_org="$1"
+    local container_image="$2"
+    shift 2
+    local services=("$@")
+    
+    local image_list=""
+    for service in "${services[@]}"; do
+        if [[ -n "$image_list" ]]; then
+            image_list+=","
+        fi
+        image_list+="${service}=${container_org}/${container_image}:${service}"
+    done
+    
+    echo "$image_list"
+}
+
+# Function to generate dynamic image updater annotations
+generate_image_updater_annotations() {
+    local git_branch="$1"
+    local image_tag_pattern="$2"
+    local ignore_tags="$3"
+    shift 3
+    local services=("$@")
+    
+    for service in "${services[@]}"; do
+        cat << EOF
+    # ${service^} image configuration
+    argocd-image-updater.argoproj.io/${service}.update-strategy: latest
+    argocd-image-updater.argoproj.io/${service}.allow-tags: regexp:^${service}-${image_tag_pattern}
+    argocd-image-updater.argoproj.io/${service}.helm.image-name: ${service}.image.repository
+    argocd-image-updater.argoproj.io/${service}.helm.image-tag: ${service}.image.tag
+    argocd-image-updater.argoproj.io/${service}.ignore-tags: ${ignore_tags}
+    argocd-image-updater.argoproj.io/${service}.force-update: "false"
+EOF
+    done
+}
+
+# Function to generate dynamic Helm parameters
+generate_helm_parameters() {
+    local services=("$@")
+    local container_org="$1"
+    local container_image="$2"
+    local image_tag_placeholder="$3"
+    shift 3
+    local services=("$@")
+    
+    for service in "${services[@]}"; do
+        cat << EOF
+        - name: ${service}.image.repository
+          value: ${container_org}/${container_image}
+        - name: ${service}.image.tag
+          value: ${service}-${image_tag_placeholder}
+EOF
+    done
+}
+
+# Function to generate ArgoCD application from repository data (Dynamic N-Microservices)
 generate_simple_app() {
     local repo_url="$1"
     local branch="$2"
@@ -363,30 +495,59 @@ generate_simple_app() {
     # Use repo_name as app_name if not specified in config
     [[ -z "$app_name" ]] && app_name="$repo_name"
     
+    # Discover microservices dynamically
+    local microservices_list
+    if ! microservices_list=$(discover_microservices "$repo_url" "$branch" "$repo_name" "$platform_config_content"); then
+        error "❌ Failed to discover microservices in $repo_name"
+        return 1
+    fi
+    
+    # Convert to array
+    local microservices=()
+    while IFS= read -r service; do
+        [[ -n "$service" ]] && microservices+=("$service")
+    done <<< "$microservices_list"
+    
+    log "🚀 Generating ArgoCD application for ${#microservices[@]} microservice(s): ${microservices[*]}"
+    log "🎯 Environment: $environment | Branch: $target_revision | Tag Pattern: $image_tag_pattern"
+    
     # Determine target revision and image tag based on environment
     local target_revision="$branch"
-    local image_tag_pattern="^${branch}-[0-9a-f]{7,8}$"
-    local image_tag_placeholder="${branch}-placeholder"
+    local image_tag_pattern="[0-9a-f]{7,8}$"
+    local image_tag_placeholder="placeholder"
+    local ignore_tags=""
     
     case "$environment" in
         "dev")
             [[ "$branch" == "main" ]] && target_revision="testing"
-            image_tag_pattern="^testing-[0-9a-f]{7,8}$"
+            image_tag_pattern="testing-(latest|[0-9a-f]{7,8})$"
             image_tag_placeholder="testing-placeholder"
+            ignore_tags="frontend-latest,frontend-main,backend-latest,backend-main"
             ;;
         "staging")
             target_revision="staging"
-            image_tag_pattern="^staging-[0-9a-f]{7,8}$"
+            image_tag_pattern="staging-(latest|[0-9a-f]{7,8})$"
             image_tag_placeholder="staging-placeholder"
+            ignore_tags="frontend-latest,frontend-main,backend-latest,backend-main"
             ;;
         "production")
             target_revision="main"
-            image_tag_pattern="^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+            image_tag_pattern="(latest|main-latest|main-[0-9a-f]{7,8}|v[0-9]+\\\\.[0-9]+\\\\.[0-9]+)$"
             image_tag_placeholder="v1.0.0"
+            ignore_tags="frontend-testing,frontend-staging,backend-testing,backend-staging"
             ;;
     esac
     
-    # Generate simple ArgoCD application (platform services are separate)
+    # Generate dynamic image list
+    local image_list=""
+    for service in "${microservices[@]}"; do
+        if [[ -n "$image_list" ]]; then
+            image_list+=","
+        fi
+        image_list+="${service}=${container_org}/${container_image}:${service}"
+    done
+    
+    # Generate ArgoCD application with dynamic microservices support
     cat << EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -399,21 +560,28 @@ metadata:
     team: $team
     environment: $environment
     app-type: $app_type
+    microservices-count: "${#microservices[@]}"
   annotations:
     app.spanda.ai/generated: "true"
-    app.spanda.ai/generator: "simple-application-deployment"
+    app.spanda.ai/generator: "dynamic-microservices-deployment"
     app.spanda.ai/generated-at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    app.spanda.ai/microservices: "$(IFS=,; echo "${microservices[*]}")"
     app.spanda.ai/uses-platform-services: "true"
-    # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: $(echo "$app_name" | tr '[:upper:]' '[:lower:]')=$container_org/$container_image
+    # ArgoCD Image Updater configuration for dynamic microservices
+    argocd-image-updater.argoproj.io/image-list: $image_list
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
-    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').update-strategy: latest
-    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').allow-tags: regexp:$image_tag_pattern
-    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').helm.image-tag: image.tag
-    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').ignore-tags: latest,main
-    argocd-image-updater.argoproj.io/$(echo "$app_name" | tr '[:upper:]' '[:lower:]').force-update: "false"
+$(for service in "${microservices[@]}"; do
+    cat << SERVICE_EOF
+    # ${service^} image configuration
+    argocd-image-updater.argoproj.io/${service}.update-strategy: latest
+    argocd-image-updater.argoproj.io/${service}.allow-tags: regexp:^${service}-${image_tag_pattern}
+    argocd-image-updater.argoproj.io/${service}.helm.image-name: ${service}.image.repository
+    argocd-image-updater.argoproj.io/${service}.helm.image-tag: ${service}.image.tag
+    argocd-image-updater.argoproj.io/${service}.ignore-tags: ${ignore_tags}
+    argocd-image-updater.argoproj.io/${service}.force-update: "false"
+SERVICE_EOF
+done)
 spec:
   project: spanda-applications
   source:
@@ -423,12 +591,17 @@ spec:
     helm:
       releaseName: $(echo "$app_name-$environment" | tr '[:upper:]' '[:lower:]')
       valueFiles:
+        - values.yaml
         - values-$environment.yaml
       parameters:
-        - name: image.repository
+$(for service in "${microservices[@]}"; do
+    cat << PARAM_EOF
+        - name: ${service}.image.repository
           value: $container_org/$container_image
-        - name: image.tag
-          value: $image_tag_placeholder
+        - name: ${service}.image.tag
+          value: ${service}-$image_tag_placeholder
+PARAM_EOF
+done)
         - name: platform.servicesEnabled
           value: "true"
   destination:
@@ -449,13 +622,17 @@ spec:
         maxDuration: 2m
   info:
     - name: 'Generated By'
-      value: 'Simple Application Generator'
+      value: 'Dynamic Microservices Generator'
     - name: 'Platform Services'
       value: 'Uses shared platform services'
     - name: 'Environment'
       value: '$environment'
     - name: 'Team'
       value: '$team'
+    - name: 'Architecture'
+      value: 'Microservices (${#microservices[@]} services: $(IFS=, ; echo "${microservices[*]}"))'
+    - name: 'Discovered Services'
+      value: '$(IFS=, ; echo "${microservices[*]}")'
 EOF
 }
 

@@ -12,18 +12,26 @@ metadata:
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "simple-application-deployment"
-    app.spanda.ai/generated-at: "2025-08-11T10:28:47Z"
+    app.spanda.ai/generated-at: "2025-08-14T06:49:06Z"
     app.spanda.ai/uses-platform-services: "true"
-    # ArgoCD Image Updater configuration
-    argocd-image-updater.argoproj.io/image-list: test-application=aryanpola/sample-application
+    # ArgoCD Image Updater configuration for microservices
+    argocd-image-updater.argoproj.io/image-list: frontend=aryanpola/sample-application:frontend,backend=aryanpola/sample-application:backend
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: staging
-    argocd-image-updater.argoproj.io/test-application.update-strategy: latest
-    argocd-image-updater.argoproj.io/test-application.allow-tags: regexp:^staging-[0-9a-f]{7,8}$
-    argocd-image-updater.argoproj.io/test-application.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/test-application.helm.image-tag: image.tag
-    argocd-image-updater.argoproj.io/test-application.ignore-tags: latest,main
-    argocd-image-updater.argoproj.io/test-application.force-update: "false"
+    # Frontend image configuration
+    argocd-image-updater.argoproj.io/frontend.update-strategy: latest
+    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-staging-(latest|[0-9a-f]{7,8})$
+    argocd-image-updater.argoproj.io/frontend.helm.image-name: frontend.image.repository
+    argocd-image-updater.argoproj.io/frontend.helm.image-tag: frontend.image.tag
+    argocd-image-updater.argoproj.io/frontend.ignore-tags: frontend-latest,frontend-main
+    argocd-image-updater.argoproj.io/frontend.force-update: "false"
+    # Backend image configuration
+    argocd-image-updater.argoproj.io/backend.update-strategy: latest
+    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-staging-(latest|[0-9a-f]{7,8})$
+    argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
+    argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
+    argocd-image-updater.argoproj.io/backend.ignore-tags: backend-latest,backend-main
+    argocd-image-updater.argoproj.io/backend.force-update: "false"
 spec:
   project: spanda-applications
   source:
@@ -33,12 +41,17 @@ spec:
     helm:
       releaseName: test-application-staging
       valueFiles:
+        - values.yaml
         - values-staging.yaml
       parameters:
-        - name: image.repository
+        - name: frontend.image.repository
           value: aryanpola/sample-application
-        - name: image.tag
-          value: staging-placeholder
+        - name: frontend.image.tag
+          value: frontend-staging-placeholder
+        - name: backend.image.repository
+          value: aryanpola/sample-application
+        - name: backend.image.tag
+          value: backend-staging-placeholder
         - name: platform.servicesEnabled
           value: "true"
   destination:

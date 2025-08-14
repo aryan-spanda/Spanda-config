@@ -18,6 +18,12 @@ data:
     argocd.grpc_web: true
     
   log.level: "info"
-  interval: "300s"
+  interval: "300s"  # Check for updates every 5 minutes
   kube.events: "true"
   kube.events.namespace: "argocd"
+  
+  # Enable support for multiple images per application
+  applications: |
+    # Support for microservices with multiple images per application
+    # This allows tracking frontend and backend images separately
+    multiImageTracking: true

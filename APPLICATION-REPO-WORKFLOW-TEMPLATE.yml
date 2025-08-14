@@ -1,115 +1,266 @@
-# Application Repository CI/CD Workflow Template
-# This file should be placed in: spanda-test-app/.github/workflows/ci-cd.yml
+# Universal CI/CD Workflow Template for Microservices
+# This template dynamically builds all microservices found in src/ directory and should be in github workflow of app
+# Works for applications with any number of microservices (2, 3, 4, etc.)
 
-name: Build and Deploy
+name: Build and Deploy Microservices
 
 on:
   push:
-    branches: [main, develop]
+    branches: [ main, develop, testing ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: aryanpola/sample-application
 
 jobs:
-  # Step 1: Update Helm values in THIS repository (app repo)
-  update-helm-values:
-    name: Update Helm Values
+  # Job 1: Discover microservices dynamically
+  discover:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'  # Only on push, not PR
     outputs:
-      image-tag: ${{ steps.vars.outputs.image-tag }}
+      services: ${{ steps.find-services.outputs.services }}
     steps:
-    - name: Checkout app repository
+    - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Set variables
-      id: vars
+      
+    - name: Find microservices
+      id: find-services
       run: |
-        SHORT_SHA=${GITHUB_SHA::8}
-        echo "image-tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+        # Find all directories in src/ that contain a Dockerfile
+        services=$(find src/ -name "Dockerfile" -exec dirname {} \; | sed 's|src/||' | jq -R -s -c 'split("\n")[:-1]')
+        echo "services=$services" >> $GITHUB_OUTPUT
+        echo "Found services: $services"
 
-    - name: Update Helm values with new image tag
-      run: |
-        NEW_TAG="${{ steps.vars.outputs.image-tag }}"
-        
-        echo "Updating Helm values with image tag: ${NEW_TAG}"
-        
-        # Update development values (always updated)
-        if [ -f "charts/test-application/values-dev.yaml" ]; then
-          sed -i "s|tag: \".*\"|tag: \"${NEW_TAG}\"|g" charts/test-application/values-dev.yaml
-          echo "✅ Updated values-dev.yaml"
-        fi
-        
-        # Update staging values (always updated)
-        if [ -f "charts/test-application/values-staging.yaml" ]; then
-          sed -i "s|tag: \".*\"|tag: \"${NEW_TAG}\"|g" charts/test-application/values-staging.yaml
-          echo "✅ Updated values-staging.yaml"
-        fi
-        
-        # Update production values (only on main branch)
-        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-          if [ -f "charts/test-application/values-prod.yaml" ]; then
-            sed -i "s|tag: \".*\"|tag: \"${NEW_TAG}\"|g" charts/test-application/values-prod.yaml
-            echo "✅ Updated values-prod.yaml (main branch)"
-          fi
-        else
-          echo "⏭️  Skipped values-prod.yaml (not main branch)"
-        fi
-
-    - name: Commit updated Helm values
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-        if git diff --quiet; then
-          echo "No changes to commit"
-          exit 0
-        fi
-        
-        git add charts/test-application/values-*.yaml
-        git commit -m "🚀 Update Helm values to use image tag ${{ steps.vars.outputs.image-tag }}
-
-        Updated by: CI/CD Pipeline
-        Commit: ${GITHUB_SHA}
-        Branch: ${{ github.ref_name }}"
-        
-        git push
-
-  # Step 2: Call platform CI/CD to build image and update config repo
-  platform-ci-cd:
-    name: Platform CI/CD
-    needs: update-helm-values
-    if: always() && github.event_name == 'push'
-    uses: aryan-spanda/config-repo/.github/workflows/reusable-platform-ci-cd.yml@main
-    with:
-      app_name: test-application
-      docker_image_name: aryanpola/sample-application
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
-
-  # Optional: Validate Helm charts
-  validate-helm:
-    name: Validate Helm Charts
+  # Job 2: Build all discovered microservices
+  build:
+    needs: discover
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.discover.outputs.services) }}
+    
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Set up Helm
-      uses: azure/setup-helm@v3
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
       with:
-        version: '3.12.0'
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Extract metadata for ${{ matrix.service }}
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch,suffix=-${{ matrix.service }}
+          type=ref,event=pr,suffix=-${{ matrix.service }}
+          type=sha,prefix=${{ matrix.service }}-
+          type=raw,value=${{ matrix.service }}-latest,enable={{is_default_branch}}
+    
+    # Build and push each microservice
+    - name: Build and push ${{ matrix.service }} image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./src/${{ matrix.service }}/Dockerfile
+        push: true
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.service }}-${{ github.sha }}
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.service }}-${{ github.ref_name }}-${{ github.sha }}
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.service }}-latest
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.service }}-${{ github.ref_name }}-latest
+        cache-from: type=gha,scope=${{ matrix.service }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-    - name: Validate Helm charts
+  # Job 3: Update deployment manifests (optional)
+  deploy:
+    needs: [discover, build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/testing' || github.ref == 'refs/heads/staging'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Update deployment manifests
       run: |
-        helm lint charts/test-application/
+        echo "Built images for services: ${{ needs.discover.outputs.services }}"
+        # Example: Update Helm values or trigger ArgoCD
+        for service in $(echo '${{ needs.discover.outputs.services }}' | jq -r '.[]'); do
+          echo "Service: $service"
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${service}-${{ github.sha }}"
+          
+          # Add your deployment logic here:
+          # - Update Helm values files
+          # - Trigger ArgoCD sync
+          # - Update Kubernetes manifests
+          # - Send webhook to deployment system
+        done
         
-        # Template the charts to check for syntax errors
-        helm template test-app charts/test-application/ --values charts/test-application/values-dev.yaml > /dev/null
-        helm template test-app charts/test-application/ --values charts/test-application/values-staging.yaml > /dev/null
-        helm template test-app charts/test-application/ --values charts/test-application/values-prod.yaml > /dev/null
+# ============================================================================
+# Templates for Other CI/CD Platforms
+# ============================================================================
+
+# GitLab CI (.gitlab-ci.yml) - Dynamic microservices build:
+# 
+# stages:
+#   - discover
+#   - build
+#   - deploy
+# 
+# discover-services:
+#   stage: discover
+#   script:
+#     - services=$(find src/ -name "Dockerfile" -exec dirname {} \; | sed 's|src/||')
+#     - echo "$services" | tee services.txt
+#   artifacts:
+#     paths:
+#       - services.txt
+# 
+# build-microservices:
+#   stage: build
+#   parallel:
+#     matrix:
+#       - SERVICE: [frontend, backend, api, worker]  # or read from services.txt
+#   script:
+#     - docker build -f src/$SERVICE/Dockerfile -t $CI_REGISTRY_IMAGE:$SERVICE-$CI_COMMIT_SHA .
+#     - docker push $CI_REGISTRY_IMAGE:$SERVICE-$CI_COMMIT_SHA
+#   rules:
+#     - if: -f "src/$SERVICE/Dockerfile"
+
+# Jenkins Pipeline (Jenkinsfile) - Dynamic microservices build:
+#
+# pipeline {
+#     agent any
+#     stages {
+#         stage('Discover Services') {
+#             steps {
+#                 script {
+#                     def services = sh(
+#                         script: "find src/ -name 'Dockerfile' -exec dirname {} \\; | sed 's|src/||'",
+#                         returnStdout: true
+#                     ).trim().split('\n')
+#                     env.SERVICES = services.join(',')
+#                     echo "Found services: ${env.SERVICES}"
+#                 }
+#             }
+#         }
+#         stage('Build Services') {
+#             steps {
+#                 script {
+#                     def services = env.SERVICES.split(',')
+#                     def builds = [:]
+#                     
+#                     services.each { service ->
+#                         builds[service] = {
+#                             node {
+#                                 def image = docker.build("aryanpola/sample-application:${service}-${env.BUILD_ID}", "-f src/${service}/Dockerfile .")
+#                                 docker.withRegistry('https://docker.io', 'docker-hub-credentials') {
+#                                     image.push("${service}-${env.BUILD_ID}")
+#                                     image.push("${service}-latest")
+#                                 }
+#                             }
+#                         }
+#                     }
+#                     parallel builds
+#                 }
+#             }
+#         }
+#     }
+# }
+
+# Azure DevOps Pipeline (azure-pipelines.yml) - Dynamic microservices:
+#
+# trigger:
+# - main
+# - develop
+# 
+# pool:
+#   vmImage: 'ubuntu-latest'
+# 
+# stages:
+# - stage: Discover
+#   jobs:
+#   - job: FindServices
+#     steps:
+#     - script: |
+#         services=$(find src/ -name "Dockerfile" -exec dirname {} \; | sed 's|src/||' | tr '\n' ',' | sed 's/,$//')
+#         echo "##vso[task.setvariable variable=services;isOutput=true]$services"
+#       name: discover
+# 
+# - stage: Build
+#   dependsOn: Discover
+#   variables:
+#     services: $[ stageDependencies.Discover.FindServices.outputs['discover.services'] ]
+#   jobs:
+#   - job: BuildImages
+#     strategy:
+#       matrix:
+#         ${{ each service in split(variables.services, ',') }}:
+#           ${{ service }}:
+#             serviceName: ${{ service }}
+#     steps:
+#     - task: Docker@2
+#       inputs:
+#         command: 'buildAndPush'
+#         repository: 'aryanpola/sample-application'
+#         dockerfile: 'src/$(serviceName)/Dockerfile'
+#         tags: |
+#           $(serviceName)-$(Build.BuildId)
+#           $(serviceName)-latest
         
-        echo "✅ All Helm charts validated successfully"
+# For other CI/CD platforms:
+# 
+# GitLab CI (.gitlab-ci.yml):
+# 
+# stages:
+#   - build
+#   - deploy
+# 
+# build-frontend:
+#   stage: build
+#   script:
+#     - docker build -f src/frontend/Dockerfile -t $CI_REGISTRY_IMAGE:frontend-$CI_COMMIT_SHA .
+#     - docker push $CI_REGISTRY_IMAGE:frontend-$CI_COMMIT_SHA
+# 
+# build-backend:
+#   stage: build  
+#   script:
+#     - docker build -f src/backend/Dockerfile -t $CI_REGISTRY_IMAGE:backend-$CI_COMMIT_SHA .
+#     - docker push $CI_REGISTRY_IMAGE:backend-$CI_COMMIT_SHA
+#
+# Jenkins Pipeline (Jenkinsfile):
+#
+# pipeline {
+#     agent any
+#     stages {
+#         stage('Build Frontend') {
+#             steps {
+#                 script {
+#                     docker.build("aryanpola/sample-application:frontend-${env.BUILD_ID}", "-f src/frontend/Dockerfile .")
+#                     docker.withRegistry('https://docker.io', 'docker-hub-credentials') {
+#                         docker.image("aryanpola/sample-application:frontend-${env.BUILD_ID}").push()
+#                     }
+#                 }
+#             }
+#         }
+#         stage('Build Backend') {
+#             steps {
+#                 script {
+#                     docker.build("aryanpola/sample-application:backend-${env.BUILD_ID}", "-f src/backend/Dockerfile .")
+#                     docker.withRegistry('https://docker.io', 'docker-hub-credentials') {
+#                         docker.image("aryanpola/sample-application:backend-${env.BUILD_ID}").push()
+#                     }
+#                 }
+#             }
+#         }
+#     }
+# }
