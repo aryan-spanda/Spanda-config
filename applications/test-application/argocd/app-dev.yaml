@@ -15,23 +15,21 @@ metadata:
     app.spanda.ai/generated-at: "2025-08-14T06:49:05Z"
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration for microservices
-    argocd-image-updater.argoproj.io/image-list: frontend=aryanpola/sample-application:frontend,backend=aryanpola/sample-application:backend
+    argocd-image-updater.argoproj.io/image-list: frontend=aryanpola/sample-application:frontend-testing-latest,backend=aryanpola/sample-application:backend-testing-latest
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
+    # Explicitly specify this is a Helm application
+    argocd-image-updater.argoproj.io/write-back-target: helmvalues
     # Frontend image configuration
     argocd-image-updater.argoproj.io/frontend.update-strategy: latest
     argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-testing-latest$
     argocd-image-updater.argoproj.io/frontend.helm.image-name: frontend.image.repository
     argocd-image-updater.argoproj.io/frontend.helm.image-tag: frontend.image.tag
-    argocd-image-updater.argoproj.io/frontend.ignore-tags: frontend-main-latest,frontend-staging-latest
-    argocd-image-updater.argoproj.io/frontend.force-update: "false"
     # Backend image configuration
     argocd-image-updater.argoproj.io/backend.update-strategy: latest
     argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-testing-latest$
     argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
     argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
-    argocd-image-updater.argoproj.io/backend.ignore-tags: backend-main-latest,backend-staging-latest
-    argocd-image-updater.argoproj.io/backend.force-update: "false"
 spec:
   project: spanda-applications
   source:
