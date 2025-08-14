@@ -9,7 +9,7 @@ data:
     - name: Docker Hub
       api_url: https://registry-1.docker.io
       prefix: docker.io
-      ping: yes
+      ping: no
       default: yes
       
   argocd.conf: |
@@ -18,7 +18,7 @@ data:
     argocd.grpc_web: true
     
   log.level: "info"
-  interval: "300s"  # Check for updates every 5 minutes
+  interval: "3600s"  # Check for updates every 1 hour to avoid rate limits
   kube.events: "true"
   kube.events.namespace: "argocd"
   

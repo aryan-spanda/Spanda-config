@@ -573,7 +573,7 @@ metadata:
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration for dynamic microservices
     argocd-image-updater.argoproj.io/image-list: $image_list
-    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
 $(for service in "${microservices[@]}"; do
     cat << SERVICE_EOF

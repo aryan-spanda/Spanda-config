@@ -16,7 +16,7 @@ metadata:
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration for microservices
     argocd-image-updater.argoproj.io/image-list: frontend=aryanpola/sample-application:frontend,backend=aryanpola/sample-application:backend
-    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
     # Frontend image configuration
     argocd-image-updater.argoproj.io/frontend.update-strategy: latest
