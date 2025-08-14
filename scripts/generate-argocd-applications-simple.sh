@@ -542,13 +542,13 @@ generate_simple_app() {
             ;;
     esac
     
-    # Generate dynamic image list
+    # Generate dynamic image list with branch-specific tags
     local image_list=""
     for service in "${microservices[@]}"; do
         if [[ -n "$image_list" ]]; then
             image_list+=","
         fi
-        image_list+="${service}=${container_org}/${container_image}:${service}"
+        image_list+="${service}=${container_org}/${container_image}:${service}-${image_tag_placeholder}"
     done
     
     # Generate ArgoCD application with dynamic microservices support
@@ -575,6 +575,8 @@ metadata:
     argocd-image-updater.argoproj.io/image-list: $image_list
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
+    # Explicitly specify this is a Helm application
+    argocd-image-updater.argoproj.io/write-back-target: helmvalues
 $(for service in "${microservices[@]}"; do
     cat << SERVICE_EOF
     # ${service^} image configuration
@@ -582,8 +584,6 @@ $(for service in "${microservices[@]}"; do
     argocd-image-updater.argoproj.io/${service}.allow-tags: regexp:^${service}-${image_tag_pattern}
     argocd-image-updater.argoproj.io/${service}.helm.image-name: ${service}.image.repository
     argocd-image-updater.argoproj.io/${service}.helm.image-tag: ${service}.image.tag
-    argocd-image-updater.argoproj.io/${service}.ignore-tags: ${ignore_tags}
-    argocd-image-updater.argoproj.io/${service}.force-update: "false"
 SERVICE_EOF
 done)
 spec:
