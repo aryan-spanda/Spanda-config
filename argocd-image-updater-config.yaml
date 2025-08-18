@@ -18,6 +18,19 @@ data:
     argocd.grpc_web: true
     
   log.level: "info"
-  interval: "300s"
+  interval: "600s"
   kube.events: "true"
   kube.events.namespace: "argocd"
+  git.commit.signing-key: ""
+  git.commit.signing-method: ""
+  # Stability settings to prevent unnecessary updates
+  applicationimageupdate.enabled: "true"
+  argocd.allow_concurrency: "false"
+  metrics.enabled: "true"
+  # Prevent unnecessary commits
+  git.commit.message-template: |
+    build: automatic update of {{.AppName}}
+    
+    {{range .AppChanges -}}
+    Updates image {{.Image}} tag '{{.OldTag}}' to '{{.NewTag}}'
+    {{end -}}

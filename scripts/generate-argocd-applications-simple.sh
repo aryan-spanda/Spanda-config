@@ -3,21 +3,23 @@
 # SPANDA AI PLATFORM - DYNAMIC MICROSERVICES ARGOCD GENERATOR
 # 
 # This script generates ArgoCD applications by reading configuration directly
-# from application repositories via GitHub API. Supports unlimited microservices!
+# from application repositories via GitHub API. Supports unlimited microservices
+# using a SINGLE Docker Hub repository for all services!
 #
-# Expected CI/CD Image Tags:
-# - <service>-latest (global latest for any branch)
+# Expected CI/CD Image Tags (Single Repository):
 # - <service>-<branch>-latest (branch-specific latest)
 # - <service>-<branch>-<sha> (specific commit builds)
-# - <service>-<sha> (sha-only builds)
 #
 # Environment Tag Patterns:
 # - dev: Tracks testing branch images (frontend-testing-latest, backend-testing-latest)
 # - staging: Tracks staging branch images (frontend-staging-latest, backend-staging-latest)  
-# - production: Tracks main branch images (frontend-latest, frontend-main-latest)
+# - production: Tracks main branch images (frontend-main-latest, backend-main-latest)
+#
+# Single Docker Hub Repository: aryanpola/sample-application
+# All services use the same repository with service-specific tags
 #
 # Author: Spanda AI DevOps Team
-# Version: 4.0 (Dynamic N-Microservices + Branch-Specific Tags)    echo -e "🚀 Spanda Platform - Dynamic Microservices Generator v4.0"
+# Version: 5.0 (Single Docker Hub Repository + Enhanced Auto-Updates)    echo -e "🚀 Spanda Platform - Dynamic Microservices Generator v4.0"
 set -euo pipefail
 
 # Configuration
@@ -410,9 +412,8 @@ discover_microservices() {
     return 0
 }
 
-# Function to generate dynamic image list for ArgoCD Image Updater
+# Function to generate dynamic image list for ArgoCD Image Updater (Single Repository)
 generate_image_list() {
-    local services=("$@")
     local container_org="$1"
     local container_image="$2"
     shift 2
@@ -423,7 +424,8 @@ generate_image_list() {
         if [[ -n "$image_list" ]]; then
             image_list+=","
         fi
-        image_list+="${service}=${container_org}/${container_image}:${service}"
+        # Single repository approach - no tag in image-list
+        image_list+="${service}=${container_org}/${container_image}"
     done
     
     echo "$image_list"
@@ -526,29 +528,26 @@ generate_simple_app() {
             [[ "$branch" == "main" ]] && target_revision="testing"
             image_tag_pattern="testing-latest$"
             image_tag_placeholder="testing-latest"
-            ignore_tags="frontend-main-latest,frontend-staging-latest,backend-main-latest,backend-staging-latest"
             ;;
         "staging")
             target_revision="staging"
             image_tag_pattern="staging-latest$"
             image_tag_placeholder="staging-latest"
-            ignore_tags="frontend-main-latest,frontend-testing-latest,backend-main-latest,backend-testing-latest"
             ;;
         "production")
             target_revision="main"
             image_tag_pattern="main-latest$"
             image_tag_placeholder="main-latest"
-            ignore_tags="frontend-testing-latest,frontend-staging-latest,backend-testing-latest,backend-staging-latest"
             ;;
     esac
     
-    # Generate dynamic image list with branch-specific tags
+    # Generate dynamic image list for single Docker Hub repository (no tag in image-list)
     local image_list=""
     for service in "${microservices[@]}"; do
         if [[ -n "$image_list" ]]; then
             image_list+=","
         fi
-        image_list+="${service}=${container_org}/${container_image}:${service}-${image_tag_placeholder}"
+        image_list+="${service}=${container_org}/${container_image}"
     done
     
     # Generate ArgoCD application with dynamic microservices support
@@ -571,21 +570,21 @@ metadata:
     app.spanda.ai/generated-at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     app.spanda.ai/microservices: "$(IFS=,; echo "${microservices[*]}")"
     app.spanda.ai/uses-platform-services: "true"
-    # ArgoCD Image Updater configuration for dynamic microservices
+    # ArgoCD Image Updater - Single Docker Hub Repository Configuration
     argocd-image-updater.argoproj.io/image-list: $image_list
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
-    # Write back to application repository, not config repository
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
     argocd-image-updater.argoproj.io/git-repository: $repo_url
 $(for service in "${microservices[@]}"; do
     cat << SERVICE_EOF
-    # ${service^} image configuration
+    # ${service^} service configuration (Stable Updates)
     argocd-image-updater.argoproj.io/${service}.update-strategy: digest
     argocd-image-updater.argoproj.io/${service}.allow-tags: regexp:^${service}-${image_tag_pattern}
+    argocd-image-updater.argoproj.io/${service}.ignore-tags: regexp:^(?!${service}-).*$
     argocd-image-updater.argoproj.io/${service}.helm.image-name: ${service}.image.repository
     argocd-image-updater.argoproj.io/${service}.helm.image-tag: ${service}.image.tag
-    argocd-image-updater.argoproj.io/${service}.force-update: "true"
+    argocd-image-updater.argoproj.io/${service}.force-update: "false"
 SERVICE_EOF
 done)
 spec:
@@ -669,9 +668,22 @@ data:
     argocd.grpc_web: true
     
   log.level: "info"
-  interval: "300s"
+  interval: "600s"
   kube.events: "true"
   kube.events.namespace: "argocd"
+  git.commit.signing-key: ""
+  git.commit.signing-method: ""
+  # Stability settings to prevent unnecessary updates
+  applicationimageupdate.enabled: "true"
+  argocd.allow_concurrency: "false"
+  metrics.enabled: "true"
+  # Prevent unnecessary commits
+  git.commit.message-template: |
+    build: automatic update of {{.AppName}}
+    
+    {{range .AppChanges -}}
+    Updates image {{.Image}} tag '{{.OldTag}}' to '{{.NewTag}}'
+    {{end -}}
 EOF
     
     success "Created ArgoCD Image Updater config: $config_file"
@@ -687,9 +699,9 @@ main() {
     local apply_mode=false
     if [[ "${1:-}" == "--apply" ]]; then
         apply_mode=true
-        log "🚀 Direct API Application Generator v3.0 (Apply Mode)"
+        log "🚀 Single Repository Application Generator v5.0 (Apply Mode)"
     else
-        log "🚀 Direct API Application Generator v3.0 (Generate Mode)"
+        log "🚀 Single Repository Application Generator v5.0 (Generate Mode)"
     fi
     echo "=================================================================="
     

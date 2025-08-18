@@ -16,25 +16,26 @@ metadata:
     app.spanda.ai/generated-at: "2025-08-18T13:10:42Z"
     app.spanda.ai/microservices: "backend,frontend"
     app.spanda.ai/uses-platform-services: "true"
-    # ArgoCD Image Updater configuration for dynamic microservices
-    argocd-image-updater.argoproj.io/image-list: backend=aryanpola/sample-application:backend-main-latest,frontend=aryanpola/sample-application:frontend-main-latest
+    # ArgoCD Image Updater - Single Docker Hub Repository Configuration (Stable)
+    argocd-image-updater.argoproj.io/image-list: backend=aryanpola/sample-application,frontend=aryanpola/sample-application
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: main
-    # Write back to application repository, not config repository
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
     argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Test-Application
-    # Backend image configuration
+    # Backend service configuration
     argocd-image-updater.argoproj.io/backend.update-strategy: digest
     argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-main-latest$
+    argocd-image-updater.argoproj.io/backend.ignore-tags: regexp:^frontend-.*$
     argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
     argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
-    argocd-image-updater.argoproj.io/backend.force-update: "true"
-    # Frontend image configuration
+    argocd-image-updater.argoproj.io/backend.force-update: "false"
+    # Frontend service configuration  
     argocd-image-updater.argoproj.io/frontend.update-strategy: digest
     argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-main-latest$
+    argocd-image-updater.argoproj.io/frontend.ignore-tags: regexp:^backend-.*$
     argocd-image-updater.argoproj.io/frontend.helm.image-name: frontend.image.repository
     argocd-image-updater.argoproj.io/frontend.helm.image-tag: frontend.image.tag
-    argocd-image-updater.argoproj.io/frontend.force-update: "true"
+    argocd-image-updater.argoproj.io/frontend.force-update: "false"
 spec:
   project: spanda-applications
   source:
