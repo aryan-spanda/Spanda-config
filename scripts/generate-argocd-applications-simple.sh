@@ -580,10 +580,11 @@ metadata:
 $(for service in "${microservices[@]}"; do
     cat << SERVICE_EOF
     # ${service^} image configuration
-    argocd-image-updater.argoproj.io/${service}.update-strategy: latest
+    argocd-image-updater.argoproj.io/${service}.update-strategy: digest
     argocd-image-updater.argoproj.io/${service}.allow-tags: regexp:^${service}-${image_tag_pattern}
     argocd-image-updater.argoproj.io/${service}.helm.image-name: ${service}.image.repository
     argocd-image-updater.argoproj.io/${service}.helm.image-tag: ${service}.image.tag
+    argocd-image-updater.argoproj.io/${service}.force-update: "true"
 SERVICE_EOF
 done)
 spec:
