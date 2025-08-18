@@ -573,10 +573,11 @@ metadata:
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration for dynamic microservices
     argocd-image-updater.argoproj.io/image-list: $image_list
-    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd-image-updater-git
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
-    # Explicitly specify this is a Helm application
+    # Write back to application repository, not config repository
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
+    argocd-image-updater.argoproj.io/git-repository: $repo_url
 $(for service in "${microservices[@]}"; do
     cat << SERVICE_EOF
     # ${service^} image configuration

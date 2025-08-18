@@ -16,10 +16,11 @@ metadata:
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater configuration for microservices
     argocd-image-updater.argoproj.io/image-list: frontend=aryanpola/sample-application:frontend-testing-latest,backend=aryanpola/sample-application:backend-testing-latest
-    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd-image-updater-git
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
-    # Explicitly specify this is a Helm application
+    # Write back to application repository, not config repository
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
+    argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Test-Application.git
     # Frontend image configuration
     argocd-image-updater.argoproj.io/frontend.update-strategy: digest
     argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-testing-latest$
