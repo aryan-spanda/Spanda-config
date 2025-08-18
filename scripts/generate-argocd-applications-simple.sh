@@ -354,12 +354,12 @@ discover_microservices() {
     local repo_name="$3"
     local platform_config="$4"
     
-    log "🔍 Discovering microservices in $repo_name"
+    log "🔍 Discovering microservices in $repo_name" >&2
     
     # First check if microservices are explicitly defined in platform-requirements.yml
     local explicit_services=$(parse_yaml "$platform_config" '.microservices[].name' 2>/dev/null || echo "")
     if [[ -n "$explicit_services" ]]; then
-        log "📋 Using explicitly defined microservices from platform-requirements.yml"
+        log "📋 Using explicitly defined microservices from platform-requirements.yml" >&2
         echo "$explicit_services"
         return 0
     fi
@@ -372,7 +372,7 @@ discover_microservices() {
     
     # Check if src directory exists and has content
     if ! echo "$src_response" | jq -e '.[] | select(.type=="dir")' >/dev/null 2>&1; then
-        log "📁 No src/ directory found, assuming single-service application"
+        log "📁 No src/ directory found, assuming single-service application" >&2
         echo "app"  # Default single service name
         return 0
     fi
@@ -385,9 +385,9 @@ discover_microservices() {
             local dockerfile_check=$(curl -s "$api_url/contents/src/$service/Dockerfile?ref=$branch" 2>/dev/null || echo "")
             if echo "$dockerfile_check" | jq -e '.content' >/dev/null 2>&1; then
                 microservices+=("$service")
-                log "✅ Found microservice: $service (has Dockerfile)"
+                log "✅ Found microservice: $service (has Dockerfile)" >&2
             else
-                log "⚠️  Directory $service exists but no Dockerfile found, skipping"
+                log "⚠️  Directory $service exists but no Dockerfile found, skipping" >&2
             fi
         fi
     done < <(echo "$src_response" | jq -r '.[] | select(.type=="dir") | .name')
@@ -396,16 +396,16 @@ discover_microservices() {
     if [[ ${#microservices[@]} -eq 0 ]]; then
         local root_dockerfile=$(curl -s "$api_url/contents/Dockerfile?ref=$branch" 2>/dev/null || echo "")
         if echo "$root_dockerfile" | jq -e '.content' >/dev/null 2>&1; then
-            log "📦 Single-service application detected (root Dockerfile)"
+            log "📦 Single-service application detected (root Dockerfile)" >&2
             echo "app"
             return 0
         else
-            error "❌ No Dockerfiles found in src/ directories or root"
+            error "❌ No Dockerfiles found in src/ directories or root" >&2
             return 1
         fi
     fi
     
-    log "🎯 Discovered ${#microservices[@]} microservices: ${microservices[*]}"
+    log "🎯 Discovered ${#microservices[@]} microservices: ${microservices[*]}" >&2
     printf '%s\n' "${microservices[@]}"
     return 0
 }
@@ -501,7 +501,7 @@ generate_simple_app() {
     
     # Discover microservices dynamically
     local microservices_list
-    if ! microservices_list=$(discover_microservices "$repo_url" "$branch" "$repo_name" "$platform_config_content"); then
+    if ! microservices_list=$(discover_microservices "$repo_url" "$branch" "$repo_name" "$platform_config"); then
         error "❌ Failed to discover microservices in $repo_name"
         return 1
     fi
@@ -512,14 +512,14 @@ generate_simple_app() {
         [[ -n "$service" ]] && microservices+=("$service")
     done <<< "$microservices_list"
     
-    log "🚀 Generating ArgoCD application for ${#microservices[@]} microservice(s): ${microservices[*]}"
-    log "🎯 Environment: $environment | Branch: $target_revision | Tag Pattern: $image_tag_pattern"
-    
     # Determine target revision and image tag based on environment
     local target_revision="$branch"
     local image_tag_pattern="[0-9a-f]{7,8}$"
     local image_tag_placeholder="placeholder"
     local ignore_tags=""
+    
+    log "🚀 Generating ArgoCD application for ${#microservices[@]} microservice(s): ${microservices[*]}" >&2
+    log "🎯 Environment: $environment | Branch: $target_revision | Tag Pattern: $image_tag_pattern" >&2
     
     case "$environment" in
         "dev")

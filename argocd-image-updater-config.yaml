@@ -9,7 +9,7 @@ data:
     - name: Docker Hub
       api_url: https://registry-1.docker.io
       prefix: docker.io
-      ping: no
+      ping: yes
       default: yes
       
   argocd.conf: |
@@ -18,12 +18,6 @@ data:
     argocd.grpc_web: true
     
   log.level: "info"
-  interval: "3600s"  # Check for updates every 1 hour to avoid rate limits
+  interval: "300s"
   kube.events: "true"
   kube.events.namespace: "argocd"
-  
-  # Enable support for multiple images per application
-  applications: |
-    # Support for microservices with multiple images per application
-    # This allows tracking frontend and backend images separately
-    multiImageTracking: true
