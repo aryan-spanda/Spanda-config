@@ -16,26 +16,26 @@ metadata:
     app.spanda.ai/generated-at: "2025-08-18T13:10:40Z"
     app.spanda.ai/microservices: "backend,frontend"
     app.spanda.ai/uses-platform-services: "true"
-    # ArgoCD Image Updater - Single Docker Hub Repository Configuration (Stable)
+    # ArgoCD Image Updater - Using SHA-based tags for reliability
     argocd-image-updater.argoproj.io/image-list: backend=aryanpola/sample-application,frontend=aryanpola/sample-application
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: testing
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
     argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Test-Application
-    # Backend service configuration
-    argocd-image-updater.argoproj.io/backend.update-strategy: digest
-    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-testing-latest$
+    # Backend service configuration - Using SHA pattern for precise tracking
+    argocd-image-updater.argoproj.io/backend.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-[0-9a-f]{7,40}.*$
     argocd-image-updater.argoproj.io/backend.ignore-tags: regexp:^frontend-.*$
     argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
     argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
-    argocd-image-updater.argoproj.io/backend.force-update: "false"
-    # Frontend service configuration  
-    argocd-image-updater.argoproj.io/frontend.update-strategy: digest
-    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-testing-latest$
+    argocd-image-updater.argoproj.io/backend.force-update: "true"
+    # Frontend service configuration - Using SHA pattern for precise tracking
+    argocd-image-updater.argoproj.io/frontend.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-[0-9a-f]{7,40}.*$
     argocd-image-updater.argoproj.io/frontend.ignore-tags: regexp:^backend-.*$
     argocd-image-updater.argoproj.io/frontend.helm.image-name: frontend.image.repository
     argocd-image-updater.argoproj.io/frontend.helm.image-tag: frontend.image.tag
-    argocd-image-updater.argoproj.io/frontend.force-update: "false"
+    argocd-image-updater.argoproj.io/frontend.force-update: "true"
 spec:
   project: spanda-applications
   source:
@@ -51,11 +51,11 @@ spec:
         - name: backend.image.repository
           value: aryanpola/sample-application
         - name: backend.image.tag
-          value: backend-testing-latest
+          value: backend-38b9887cba1e1843cd021a69e87a22d58b8d8b5f
         - name: frontend.image.repository
           value: aryanpola/sample-application
         - name: frontend.image.tag
-          value: frontend-testing-latest
+          value: frontend-38b9887cba1e1843cd021a69e87a22d58b8d8b5f
         - name: platform.servicesEnabled
           value: "true"
   destination:

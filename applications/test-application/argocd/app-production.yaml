@@ -22,20 +22,20 @@ metadata:
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
     argocd-image-updater.argoproj.io/git-repository: https://github.com/aryan-spanda/Test-Application
-    # Backend service configuration
-    argocd-image-updater.argoproj.io/backend.update-strategy: digest
-    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-main-latest$
+    # Backend service configuration - Using SHA tags for reliability
+    argocd-image-updater.argoproj.io/backend.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-[0-9a-f]{7,40}.*$
     argocd-image-updater.argoproj.io/backend.ignore-tags: regexp:^frontend-.*$
     argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
     argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
-    argocd-image-updater.argoproj.io/backend.force-update: "false"
-    # Frontend service configuration  
-    argocd-image-updater.argoproj.io/frontend.update-strategy: digest
-    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-main-latest$
+    argocd-image-updater.argoproj.io/backend.force-update: "true"
+    # Frontend service configuration - Using SHA tags for reliability
+    argocd-image-updater.argoproj.io/frontend.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-[0-9a-f]{7,40}.*$
     argocd-image-updater.argoproj.io/frontend.ignore-tags: regexp:^backend-.*$
     argocd-image-updater.argoproj.io/frontend.helm.image-name: frontend.image.repository
     argocd-image-updater.argoproj.io/frontend.helm.image-tag: frontend.image.tag
-    argocd-image-updater.argoproj.io/frontend.force-update: "false"
+    argocd-image-updater.argoproj.io/frontend.force-update: "true"
 spec:
   project: spanda-applications
   source:
@@ -51,11 +51,11 @@ spec:
         - name: backend.image.repository
           value: aryanpola/sample-application
         - name: backend.image.tag
-          value: backend-main-latest
+          value: backend-38b9887cba1e1843cd021a69e87a22d58b8d8b5f
         - name: frontend.image.repository
           value: aryanpola/sample-application
         - name: frontend.image.tag
-          value: frontend-main-latest
+          value: frontend-38b9887cba1e1843cd021a69e87a22d58b8d8b5f
         - name: platform.servicesEnabled
           value: "true"
   destination:

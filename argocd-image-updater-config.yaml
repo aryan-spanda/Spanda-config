@@ -18,19 +18,19 @@ data:
     argocd.grpc_web: true
     
   log.level: "info"
-  interval: "600s"
+  interval: "600s"  # Check every 10 minutes - more conservative
   kube.events: "true"
   kube.events.namespace: "argocd"
   git.commit.signing-key: ""
   git.commit.signing-method: ""
-  # Stability settings to prevent unnecessary updates
+  # Conservative settings to prevent update loops
   applicationimageupdate.enabled: "true"
-  argocd.allow_concurrency: "false"
+  argocd.allow_concurrency: "false"  # Prevent race conditions
   metrics.enabled: "true"
-  # Prevent unnecessary commits
+  # Only commit when there are actual changes
   git.commit.message-template: |
     build: automatic update of {{.AppName}}
     
     {{range .AppChanges -}}
-    Updates image {{.Image}} tag '{{.OldTag}}' to '{{.NewTag}}'
+    Updates {{.Image}} tag '{{.OldTag}}' to '{{.NewTag}}'
     {{end -}}

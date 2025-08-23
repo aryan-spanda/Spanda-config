@@ -10,16 +10,17 @@
 # - <service>-<branch>-latest (branch-specific latest)
 # - <service>-<branch>-<sha> (specific commit builds)
 #
-# Environment Tag Patterns:
-# - dev: Tracks testing branch images (frontend-testing-latest, backend-testing-latest)
-# - staging: Tracks staging branch images (frontend-staging-latest, backend-staging-latest)  
-# - production: Tracks main branch images (frontend-main-latest, backend-main-latest)
+# UPDATED Environment Tag Patterns (All use SHA-based tags for reliability):
+# - dev: Tracks SHA-based tags (backend-<sha>, frontend-<sha>)
+# - staging: Tracks SHA-based tags (backend-<sha>, frontend-<sha>)  
+# - production: Tracks SHA-based tags (backend-<sha>, frontend-<sha>)
 #
 # Single Docker Hub Repository: aryanpola/sample-application
-# All services use the same repository with service-specific tags
+# All services use the same repository with service-specific SHA tags
+# All environments use SHA-based tags for precise versioning
 #
 # Author: Spanda AI DevOps Team
-# Version: 5.0 (Single Docker Hub Repository + Enhanced Auto-Updates)    echo -e "🚀 Spanda Platform - Dynamic Microservices Generator v4.0"
+# Version: 7.0 (SHA-Based Tags - All Environments Use Commit SHA Tags + Newest-Build Strategy)
 set -euo pipefail
 
 # Configuration
@@ -441,20 +442,19 @@ generate_image_updater_annotations() {
     
     for service in "${services[@]}"; do
         cat << EOF
-    # ${service^} image configuration
-    argocd-image-updater.argoproj.io/${service}.update-strategy: latest
+    # ${service^} image configuration - Using SHA-based tags for reliability
+    argocd-image-updater.argoproj.io/${service}.update-strategy: newest-build
     argocd-image-updater.argoproj.io/${service}.allow-tags: regexp:^${service}-${image_tag_pattern}
     argocd-image-updater.argoproj.io/${service}.helm.image-name: ${service}.image.repository
     argocd-image-updater.argoproj.io/${service}.helm.image-tag: ${service}.image.tag
     argocd-image-updater.argoproj.io/${service}.ignore-tags: ${ignore_tags}
-    argocd-image-updater.argoproj.io/${service}.force-update: "false"
+    argocd-image-updater.argoproj.io/${service}.force-update: "true"
 EOF
     done
 }
 
 # Function to generate dynamic Helm parameters
 generate_helm_parameters() {
-    local services=("$@")
     local container_org="$1"
     local container_image="$2"
     local image_tag_placeholder="$3"
@@ -463,14 +463,10 @@ generate_helm_parameters() {
     
     for service in "${services[@]}"; do
         cat << EOF
-        - name: frontend.image.repository
+        - name: ${service}.image.repository
           value: ${container_org}/${container_image}
-        - name: frontend.image.tag
-          value: frontend-${image_tag_placeholder}
-        - name: backend.image.repository
-          value: ${container_org}/${container_image}
-        - name: backend.image.tag
-          value: backend-${image_tag_placeholder}
+        - name: ${service}.image.tag
+          value: ${service}-${image_tag_placeholder}
 EOF
     done
 }
@@ -526,18 +522,18 @@ generate_simple_app() {
     case "$environment" in
         "dev")
             [[ "$branch" == "main" ]] && target_revision="testing"
-            image_tag_pattern="testing-latest$"
-            image_tag_placeholder="testing-latest"
+            image_tag_pattern="[0-9a-f]{7,40}.*$"  # SHA-based pattern
+            image_tag_placeholder="38b9887cba1e1843cd021a69e87a22d58b8d8b5f"  # Example SHA
             ;;
         "staging")
-            target_revision="staging"
-            image_tag_pattern="staging-latest$"
-            image_tag_placeholder="staging-latest"
+            target_revision="testing"  # All use testing branch
+            image_tag_pattern="[0-9a-f]{7,40}.*$"  # SHA-based pattern
+            image_tag_placeholder="38b9887cba1e1843cd021a69e87a22d58b8d8b5f"  # Example SHA
             ;;
         "production")
-            target_revision="main"
-            image_tag_pattern="main-latest$"
-            image_tag_placeholder="main-latest"
+            target_revision="testing"  # All use testing branch
+            image_tag_pattern="[0-9a-f]{7,40}.*$"  # SHA-based pattern
+            image_tag_placeholder="38b9887cba1e1843cd021a69e87a22d58b8d8b5f"  # Example SHA
             ;;
     esac
     
@@ -874,7 +870,7 @@ main() {
 
 # Show usage information
 show_usage() {
-    echo "🚀 Spanda Platform - Direct API Application Generator v3.0"
+    echo "🚀 Spanda Platform - Direct API Application Generator v6.0"
     echo ""
     echo "DESCRIPTION:"
     echo "  Generates ArgoCD applications by reading configuration directly from"
