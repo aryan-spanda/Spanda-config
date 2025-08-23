@@ -11,9 +11,9 @@
 # - <service>-<branch>-<sha> (specific commit builds)
 #
 # UPDATED Environment Tag Patterns (All use SHA-based tags for reliability):
-# - dev: Tracks SHA-based tags (backend-<sha>, frontend-<sha>)
-# - staging: Tracks SHA-based tags (backend-<sha>, frontend-<sha>)  
-# - production: Tracks SHA-based tags (backend-<sha>, frontend-<sha>)
+# - dev: Tracks SHA-based tags from testing branch (backend-<sha>, frontend-<sha>)
+# - staging: Tracks SHA-based tags from staging branch (backend-<sha>, frontend-<sha>)  
+# - production: Tracks SHA-based tags from main branch (backend-<sha>, frontend-<sha>)
 #
 # Single Docker Hub Repository: aryanpola/sample-application
 # All services use the same repository with service-specific SHA tags
@@ -522,18 +522,18 @@ generate_simple_app() {
     case "$environment" in
         "dev")
             [[ "$branch" == "main" ]] && target_revision="testing"
-            image_tag_pattern="[0-9a-f]{7,40}.*$"  # SHA-based pattern
-            image_tag_placeholder="38b9887cba1e1843cd021a69e87a22d58b8d8b5f"  # Example SHA
+            image_tag_pattern="[0-9a-f]{7,40}$"  # SHA-based pattern
+            image_tag_placeholder="abc1234"  # Placeholder SHA
             ;;
         "staging")
-            target_revision="testing"  # All use testing branch
-            image_tag_pattern="[0-9a-f]{7,40}.*$"  # SHA-based pattern
-            image_tag_placeholder="38b9887cba1e1843cd021a69e87a22d58b8d8b5f"  # Example SHA
+            target_revision="staging"
+            image_tag_pattern="[0-9a-f]{7,40}$"  # SHA-based pattern
+            image_tag_placeholder="abc1234"  # Placeholder SHA
             ;;
         "production")
-            target_revision="testing"  # All use testing branch
-            image_tag_pattern="[0-9a-f]{7,40}.*$"  # SHA-based pattern
-            image_tag_placeholder="38b9887cba1e1843cd021a69e87a22d58b8d8b5f"  # Example SHA
+            target_revision="main"
+            image_tag_pattern="[0-9a-f]{7,40}$"  # SHA-based pattern
+            image_tag_placeholder="abc1234"  # Placeholder SHA
             ;;
     esac
     
@@ -566,21 +566,30 @@ metadata:
     app.spanda.ai/generated-at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     app.spanda.ai/microservices: "$(IFS=,; echo "${microservices[*]}")"
     app.spanda.ai/uses-platform-services: "true"
-    # ArgoCD Image Updater - Single Docker Hub Repository Configuration
+    # ArgoCD Image Updater - Using SHA-based tags for reliability
     argocd-image-updater.argoproj.io/image-list: $image_list
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: $target_revision
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
     argocd-image-updater.argoproj.io/git-repository: $repo_url
 $(for service in "${microservices[@]}"; do
+    # Generate the ignore pattern for this service (ignore other services)
+    other_services=()
+    for s in "${microservices[@]}"; do
+        if [[ "$s" != "$service" ]]; then
+            other_services+=("$s")
+        fi
+    done
+    ignore_pattern="regexp:^$(IFS='|'; echo "${other_services[*]}")-.*$"
+    
     cat << SERVICE_EOF
-    # ${service^} service configuration (Stable Updates)
-    argocd-image-updater.argoproj.io/${service}.update-strategy: digest
+    # ${service^} service configuration - Using SHA-based tags
+    argocd-image-updater.argoproj.io/${service}.update-strategy: newest-build
     argocd-image-updater.argoproj.io/${service}.allow-tags: regexp:^${service}-${image_tag_pattern}
-    argocd-image-updater.argoproj.io/${service}.ignore-tags: regexp:^(?!${service}-).*$
+    argocd-image-updater.argoproj.io/${service}.ignore-tags: $ignore_pattern
     argocd-image-updater.argoproj.io/${service}.helm.image-name: ${service}.image.repository
     argocd-image-updater.argoproj.io/${service}.helm.image-tag: ${service}.image.tag
-    argocd-image-updater.argoproj.io/${service}.force-update: "false"
+    argocd-image-updater.argoproj.io/${service}.force-update: "true"
 SERVICE_EOF
 done)
 spec:
