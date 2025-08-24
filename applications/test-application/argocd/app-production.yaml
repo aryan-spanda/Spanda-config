@@ -50,12 +50,8 @@ spec:
       parameters:
         - name: backend.image.repository
           value: aryanpola/sample-application
-        - name: backend.image.tag
-          value: backend-38b9887cba1e1843cd021a69e87a22d58b8d8b5f
         - name: frontend.image.repository
           value: aryanpola/sample-application
-        - name: frontend.image.tag
-          value: frontend-38b9887cba1e1843cd021a69e87a22d58b8d8b5f
         - name: platform.servicesEnabled
           value: "true"
   destination:

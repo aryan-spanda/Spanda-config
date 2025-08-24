@@ -453,7 +453,7 @@ EOF
     done
 }
 
-# Function to generate dynamic Helm parameters
+# Function to generate dynamic Helm parameters (without hardcoded image tags)
 generate_helm_parameters() {
     local container_org="$1"
     local container_image="$2"
@@ -465,9 +465,8 @@ generate_helm_parameters() {
         cat << EOF
         - name: ${service}.image.repository
           value: ${container_org}/${container_image}
-        - name: ${service}.image.tag
-          value: ${service}-${image_tag_placeholder}
 EOF
+        # Note: Removed hardcoded image.tag parameters to allow Image Updater to manage tags
     done
 }
 
@@ -608,8 +607,6 @@ $(for service in "${microservices[@]}"; do
     cat << PARAM_EOF
         - name: ${service}.image.repository
           value: $container_org/$container_image
-        - name: ${service}.image.tag
-          value: ${service}-$image_tag_placeholder
 PARAM_EOF
 done)
         - name: platform.servicesEnabled
