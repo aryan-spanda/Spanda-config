@@ -1,0 +1,132 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: spanda-platform
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: spanda-platform
+    app.kubernetes.io/managed-by: platform-team
+    spanda.ai/platform: "true"
+spec:
+  description: Project for Spanda Platform internal services and infrastructure
+  
+  # LOCKED DOWN: Only allow platform repositories
+  sourceRepos:
+  - 'https://github.com/aryan-spanda/spanda-config.git'
+  - 'https://github.com/aryan-spanda/*'  # Platform repositories only
+  
+  # LOCKED DOWN: Only allow platform namespaces
+  destinations:
+  - namespace: 'argocd'
+    server: https://kubernetes.default.svc
+  - namespace: 'platform-*'  # e.g., platform-networking, platform-security, platform-data
+    server: https://kubernetes.default.svc
+  - namespace: 'ingress-nginx'
+    server: https://kubernetes.default.svc
+  - namespace: 'metallb-system'
+    server: https://kubernetes.default.svc
+  - namespace: 'monitoring'
+    server: https://kubernetes.default.svc
+  - namespace: 'vault'
+    server: https://kubernetes.default.svc
+  - namespace: 'cert-manager'
+    server: https://kubernetes.default.svc
+  
+  # Allow cluster-level resources for platform services only
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRole
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRoleBinding
+  - group: 'apiextensions.k8s.io'
+    kind: CustomResourceDefinition
+  - group: 'networking.k8s.io'
+    kind: IngressClass
+  - group: 'storage.k8s.io'
+    kind: StorageClass
+  - group: 'policy'
+    kind: PodSecurityPolicy
+  
+  # Platform-level resources (comprehensive for infrastructure)
+  namespaceResourceWhitelist:
+  # Core platform resources
+  - group: ''
+    kind: Service
+  - group: ''
+    kind: ConfigMap
+  - group: ''
+    kind: Secret
+  - group: ''
+    kind: ServiceAccount
+  - group: ''
+    kind: PersistentVolumeClaim
+  
+  # Workload resources
+  - group: apps
+    kind: Deployment
+  - group: apps
+    kind: ReplicaSet
+  - group: apps
+    kind: StatefulSet
+  - group: apps
+    kind: DaemonSet
+  
+  # Batch resources
+  - group: batch
+    kind: Job
+  - group: batch
+    kind: CronJob
+  
+  # Networking resources
+  - group: networking.k8s.io
+    kind: Ingress
+  - group: networking.k8s.io
+    kind: NetworkPolicy
+  
+  # Scaling resources
+  - group: autoscaling
+    kind: HorizontalPodAutoscaler
+  
+  # Monitoring resources
+  - group: monitoring.coreos.com
+    kind: ServiceMonitor
+  - group: monitoring.coreos.com
+    kind: PodMonitor
+  - group: monitoring.coreos.com
+    kind: PrometheusRule
+  - group: monitoring.coreos.com
+    kind: Prometheus
+  - group: monitoring.coreos.com
+    kind: Alertmanager
+  
+  # Security resources
+  - group: cert-manager.io
+    kind: Certificate
+  - group: cert-manager.io
+    kind: Issuer
+  - group: cert-manager.io
+    kind: ClusterIssuer
+  
+  # Platform-specific resources
+  - group: argoproj.io
+    kind: Application
+  - group: argoproj.io
+    kind: AppProject
+  
+  # Policy resources
+  - group: networking.k8s.io
+    kind: NetworkPolicy
+  - group: policy
+    kind: PodDisruptionBudget
+  
+  # Role-based access (platform services)
+  - group: rbac.authorization.k8s.io
+    kind: Role
+  - group: rbac.authorization.k8s.io
+    kind: RoleBinding
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRole
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRoleBinding

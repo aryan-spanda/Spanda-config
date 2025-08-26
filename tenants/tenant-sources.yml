@@ -1,0 +1,46 @@
+# =============================================================================
+# SPANDA AI PLATFORM - TENANT CONFIGURATION
+# =============================================================================
+# This is the master list of all tenants on the Spanda AI Platform.
+# To add a new tenant, simply add their configuration here and run:
+# ./scripts/onboard-tenants.sh
+# =============================================================================
+
+tenants:
+  # Test Application Tenant (new version to avoid namespace conflict)
+  - name: "test-application-2"
+    git_org: "aryan-spanda"
+    description: "New test application tenant for testing the factory"
+    cpu_quota: "30"
+    memory_quota: "60Gi"
+    storage_quota: "150Gi"
+    environments: ["dev", "staging", "prod"]
+
+  # Example Startup Tenant
+  - name: "example-startup"
+    git_org: "aryan-spanda"
+    description: "Small startup with basic resource needs"
+    cpu_quota: "20"
+    memory_quota: "40Gi"
+    storage_quota: "100Gi"
+    environments: ["dev", "staging", "prod"]  # New Client Template (uncomment and modify for new clients)
+  # - name: "new-client"
+  #   git_org: "new-client-org"
+  #   description: "Description of the new client"
+  #   cpu_quota: "10"
+  #   memory_quota: "20Gi"
+  #   storage_quota: "50Gi"
+  #   environments: ["dev", "staging", "prod"]
+
+# =============================================================================
+# TENANT DISCOVERY SETTINGS
+# =============================================================================
+# The onboarding script can also discover tenants from application repositories
+# by scanning platform-requirements.yml files from application-sources.txt
+discovery:
+  enabled: true
+  scan_application_repos: true
+  default_quotas:
+    cpu_quota: "15"
+    memory_quota: "30Gi"
+    storage_quota: "75Gi"

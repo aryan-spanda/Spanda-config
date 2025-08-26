@@ -6,6 +6,8 @@ metadata:
     name: development
     environment: dev
     app.kubernetes.io/part-of: spandaai-platform
+    spanda.ai/platform: "true"
+    spanda.ai/legacy: "true"
 ---
 apiVersion: v1
 kind: Namespace
@@ -15,6 +17,8 @@ metadata:
     name: staging
     environment: staging
     app.kubernetes.io/part-of: spandaai-platform
+    spanda.ai/platform: "true"
+    spanda.ai/legacy: "true"
 ---
 apiVersion: v1
 kind: Namespace
@@ -24,6 +28,46 @@ metadata:
     name: production
     environment: prod
     app.kubernetes.io/part-of: spandaai-platform
+    spanda.ai/platform: "true"
+    spanda.ai/legacy: "true"
+---
+# =============================================================================
+# TENANT NAMESPACES - EXAMPLE (Created by Tenant Factory)
+# =============================================================================
+# These are examples of tenant namespaces. In production, these should be
+# created by the tenant factory module, not manually defined here.
+# =============================================================================
+
+# Example Startup Tenant Namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: example-startup-dev
+  labels:
+    spanda.ai/tenant: example-startup
+    spanda.ai/environment: dev
+    spanda.ai/managed-by: tenant-factory
+    app.kubernetes.io/part-of: spanda-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: example-startup-staging
+  labels:
+    spanda.ai/tenant: example-startup
+    spanda.ai/environment: staging
+    spanda.ai/managed-by: tenant-factory
+    app.kubernetes.io/part-of: spanda-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: example-startup-prod
+  labels:
+    spanda.ai/tenant: example-startup
+    spanda.ai/environment: prod
+    spanda.ai/managed-by: tenant-factory
+    app.kubernetes.io/part-of: spanda-platform
 ---
 # Legacy namespaces - for backward compatibility
 apiVersion: v1
@@ -34,7 +78,8 @@ metadata:
     name: test-application
     environment: prod
     app.kubernetes.io/part-of: spandaai-platform
-    legacy: "true"
+    spanda.ai/legacy: "true"
+    spanda.ai/deprecated: "true"
 ---
 apiVersion: v1
 kind: Namespace
@@ -44,4 +89,5 @@ metadata:
     name: test-application-staging
     environment: staging
     app.kubernetes.io/part-of: spandaai-platform
-    legacy: "true"
+    spanda.ai/legacy: "true"
+    spanda.ai/deprecated: "true"

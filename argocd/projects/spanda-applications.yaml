@@ -7,13 +7,13 @@ metadata:
     app.kubernetes.io/name: spanda-applications
     app.kubernetes.io/managed-by: platform-team
 spec:
-  description: Project for all Spanda Platform applications - supports client repositories
+  description: Project for Spanda Platform applications - supports client repositories (legacy)
   
-  # Allow applications from ANY repository (client-provided repos)
+  # Allow applications from client repositories
   sourceRepos:
   - '*'  # Clients can deploy from their own repositories
   
-  # Explicitly define target environments and allow custom namespaces
+  # Support both tenant namespaces and legacy namespaces for backward compatibility
   destinations:
   - namespace: 'development'
     server: https://kubernetes.default.svc
@@ -21,15 +21,23 @@ spec:
     server: https://kubernetes.default.svc
   - namespace: 'production'
     server: https://kubernetes.default.svc
-  - namespace: '*'  # Allow dynamic namespace creation with proper controls
+  # Legacy application namespaces
+  - namespace: 'test-application*'
+    server: https://kubernetes.default.svc
+  # Tenant namespaces (for applications not yet using tenant-specific projects)
+  - namespace: '*-dev'
+    server: https://kubernetes.default.svc
+  - namespace: '*-staging'
+    server: https://kubernetes.default.svc
+  - namespace: '*-prod'
     server: https://kubernetes.default.svc
   
-  # Cluster-level resources (minimal permissions)
+  # Limited cluster-level resources for applications
   clusterResourceWhitelist:
   - group: ''
     kind: Namespace
   
-  # Application-level resources (comprehensive but controlled)
+  # Application-level resources (for client applications)
   namespaceResourceWhitelist:
   # Core application resources
   - group: ''
@@ -50,6 +58,14 @@ spec:
     kind: ReplicaSet
   - group: apps
     kind: StatefulSet
+  - group: apps
+    kind: DaemonSet
+  
+  # Batch resources
+  - group: batch
+    kind: Job
+  - group: batch
+    kind: CronJob
   
   # Networking resources
   - group: networking.k8s.io
@@ -64,8 +80,10 @@ spec:
   # Monitoring resources (if using ServiceMonitor)
   - group: monitoring.coreos.com
     kind: ServiceMonitor
+  - group: monitoring.coreos.com
+    kind: PodMonitor
   
-  # Role-based access (limited)
+  # Role-based access (limited to namespace level)
   - group: rbac.authorization.k8s.io
     kind: Role
   - group: rbac.authorization.k8s.io
