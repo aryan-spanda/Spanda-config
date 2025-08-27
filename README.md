@@ -1,292 +1,260 @@
-# Spanda Platform - Configuration Repository
+# 🚀 Spanda Platform - Configuration Repository
 
-This repository contains all deployment configurations for the Spanda Platform using GitOps principles with ArgoCD. It serves as the **single source of truth** for what's deployed in your Kubernetes clusters.
+**GitOps-based multi-tenant platform for automated application deployment using ArgoCD.**
 
-## 🎯 Repository Purpose
+## 🏗️ Architecture Overview
 
-This config repository follows the GitOps pattern where:
-- **Application source code and Helm charts** live in application repositories (e.g., Test-Application)
-- **Deployment configurations (ArgoCD Applications)** live here in the config repository
-- **ArgoCD** monitors this repository and automatically deploys changes to Kubernetes
-- **ArgoCD Image Updater** automatically updates image tags for continuous deployment
+### **Two-Layer Deployment Model**
+
+#### **Layer 1: Platform Infrastructure** 
+- **Repository**: `spandaai-platform-deployment` 
+- **Purpose**: Deploy shared platform services once (MetalLB, networking, security)
+- **Method**: Direct Terraform deployment
+
+#### **Layer 2: Applications**
+- **Repository**: `config-repo` (this repo)  
+- **Purpose**: Deploy tenant applications that consume platform services
+- **Method**: GitOps via ArgoCD
+
+### **Multi-Tenant Security Model**
+- **`spanda-platform`**: Platform services with cluster-level access
+- **`spanda-applications`**: Legacy applications with namespace-level access  
+- **`{tenant-name}`**: Tenant-specific projects with isolated namespaces
 
 ## 📁 Repository Structure
 
 ```
 config-repo/
-├── 🚀 applications/                   # ArgoCD Application definitions
-│   └── test-application/
-│       ├── README.md                  # Application-specific documentation
-│       └── argocd/
-│           ├── app-dev.yaml          # Development environment
-│           ├── app-staging.yaml      # Staging environment
-│           └── app-production.yaml   # Production environment
-│
-├── 🏗️ infrastructure/                # Cluster-wide infrastructure
-│   └── namespaces/
-│       └── app-namespaces.yaml       # Environment namespaces (dev, staging, production)
-│
-├── ⚙️ argocd/                        # ArgoCD configuration
-│   └── projects/
-│       └── spanda-applications.yaml  # ArgoCD project with RBAC
-│
-├── 🔄 cluster-config/                # Bootstrap configuration
-│   └── argocd/
-│       └── app-of-apps.yaml         # App-of-Apps pattern for ArgoCD
-│
-├── 🛠️ scripts/                      # Platform automation scripts
-│   ├── main.sh                      # Main orchestration script
-│   ├── sync-app-repos.sh           # Repository synchronization
-│   ├── generate-argocd-applications.sh # ArgoCD manifest generation
-│   └── README-MAIN.md               # Script usage documentation
-│
-├── 📋 local-app-repos/               # Local repository clones (gitignored)
-│   └── Test-Application/            # Synced application repositories
-│
-├── application-sources.txt           # Master list of application repositories
-└── .gitignore                       # Excludes local clones and temp files
+├── 🚀 applications/                    # ArgoCD Application definitions
+│   └── Test-Application/argocd/        # Generated tenant applications
+├── ⚙️ argocd/projects/                 # ArgoCD project configurations  
+├── 🏢 tenants/tenant-sources.yml       # Multi-tenant configuration
+├── 🔧 scripts/                        # Automation scripts
+│   ├── generate-argocd-applications-simple.sh  # App generation
+│   └── main.sh                        # Main orchestration
+├── 📋 application-sources.txt          # Application repositories
+└── 🔑 argocd-image-updater-git-secret.yaml  # Git credentials
 ```
 
-## 🚀 Platform Team Workflow
+## 🚀 Quick Start Guide
 
-The platform team uses an automated workflow to onboard and manage applications:
+### **Prerequisites**
+- Kubernetes cluster with ArgoCD deployed
+- `yq`, `kubectl`, `bash` installed
+- GitHub Personal Access Token
 
-### 1️⃣ Add New Application
+### **Step 1: Install Dependencies**
 ```bash
-cd config-repo
-echo "https://github.com/your-org/new-app.git" >> application-sources.txt
-# Or specify a branch: echo "https://github.com/your-org/new-app/tree/testing" >> application-sources.txt
+# Windows (PowerShell)
+winget install mikefarah.yq
+
+# Or using WSL
+sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+sudo chmod +x /usr/local/bin/yq
 ```
 
-### 2️⃣ Run Main Orchestration Script
+### **Step 2: Deploy Platform Infrastructure** 
 ```bash
-# Process all applications
-./scripts/main.sh
-
-# Or process specific application
-./scripts/main.sh MyApplication
+cd ../spandaai-platform-deployment/bare-metal
+./deploy-baremetal-complete-clean.sh
 ```
 
-**The main script automatically:**
-- ✅ Syncs all application repositories
-- ✅ Generates ArgoCD application manifests
-- ✅ Commits changes to testing branch
-- ✅ Pushes to remote repository
-- ✅ Provides GitHub links for review
+### **Step 3: Create New Tenant**
+```bash
+# Edit tenant configuration
+vim tenants/tenant-sources.yml
 
-### 3️⃣ Review and Merge
-- Review changes in testing branch
-- Create pull request to main branch
-- Once merged, ArgoCD detects and deploys applications
+# Add new tenant:
+tenants:
+  - name: "my-tenant"
+    git_org: "my-org"  
+    cpu_quota: "20"
+    memory_quota: "40Gi"
+    storage_quota: "100Gi"
+    environments: ["dev", "staging", "prod"]
 
-## 🔄 GitOps Flow & Continuous Deployment
-
-### How Automatic Deployments Work
-
-1. **Code Push**: Developer pushes code to application repository (e.g., Test-Application)
-2. **CI/CD Pipeline**: GitHub Actions builds and pushes Docker image to GHCR
-3. **Image Update**: ArgoCD Image Updater automatically updates Helm values
-4. **Deployment**: ArgoCD syncs changes to Kubernetes clusters
-
-### ArgoCD Image Updater Configuration
-
-All environments are configured with automatic image updates:
-
-```yaml
-# Applied to all environments (dev, staging, production)
-argocd-image-updater.argoproj.io/image-list: app-name=ghcr.io/aryan-spanda/app-name
-argocd-image-updater.argoproj.io/app-name.update-strategy: semver
-argocd-image-updater.argoproj.io/app-name.allow-tags: regexp:^v[0-9]+\.[0-9]+\.[0-9]+$
-argocd-image-updater.argoproj.io/write-back-method: git
+# Deploy tenant infrastructure
+cd ../spandaai-platform-deployment/bare-metal/examples/tenant-onboarding
+terraform apply -var="tenants_file=../../../config-repo/tenants/tenant-sources.yml"
 ```
 
-## 🌍 Environment Configuration
+### **Step 4: Onboard Application**
+```bash
+# Add application repository
+echo "https://github.com/my-org/my-app/tree/testing" >> application-sources.txt
 
-### 🟢 Development (`app-dev.yaml`)
-- **Namespace**: `development`
-- **Sync Policy**: Automated (selfHeal: true, prune: true)
-- **Image Updates**: Automatic with semver tags
-- **Purpose**: Rapid development and testing
-
-### 🟡 Staging (`app-staging.yaml`)
-- **Namespace**: `staging`
-- **Sync Policy**: Automated (selfHeal: true, prune: true)
-- **Image Updates**: Automatic with semver tags
-- **Purpose**: Pre-production testing and validation
-
-### 🔴 Production (`app-production.yaml`)
-- **Namespace**: `production`
-- **Sync Policy**: Manual (no automated sync for safety)
-- **Image Updates**: Automatic with semver tags
-- **Revision History**: Limited to 10 for performance
-- **Purpose**: Live production workloads
-
-## 📋 Application Requirements
-
-For successful onboarding, application repositories must have:
-
-### 1. `platform-requirements.yml` in the root directory:
-```yaml
+# Ensure app has platform-requirements.yml:
 app:
-  name: "my-application"
-  repoURL: "https://github.com/your-org/my-application.git"
-  chartPath: "deploy/helm"
-  type: "fullstack"        # fullstack, frontend, backend, api
-  team: "development-team" # Team responsible for the application
+  name: "my-app"
+  tenant: "my-tenant"  # Maps to tenant project
+  type: "fullstack" 
+  team: "dev-team"
+environments: ["dev", "staging", "prod"]
 
-environments:
-  - dev
-  - staging
-  - production
+# Generate ArgoCD applications  
+./scripts/generate-argocd-applications-simple.sh
+
+# Deploy applications
+kubectl apply -f applications/My-App/argocd/
 ```
 
-### 2. Helm Charts at the specified `chartPath`:
+## 🔄 Automation Workflows
+
+### **Application Generation**
+The `generate-argocd-applications-simple.sh` script:
+- ✅ Reads `application-sources.txt` 
+- ✅ Fetches `platform-requirements.yml` from GitHub
+- ✅ Auto-discovers microservices in `src/*/Dockerfile`
+- ✅ Generates tenant-aware ArgoCD applications
+- ✅ Configures ArgoCD Image Updater for automatic deployments
+
+### **Image Update Automation**
+```yaml
+# Automatic image tag updates on commit
+argocd-image-updater.argoproj.io/image-list: backend=aryanpola/sample-application,frontend=aryanpola/sample-application
+argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-[0-9a-f]{7,40}$
+argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
 ```
-deploy/helm/
-├── Chart.yaml
-├── values.yaml              # Base values
-├── values-dev.yaml          # Development overrides
-├── values-staging.yaml      # Staging overrides
-├── values-production.yaml   # Production overrides
-└── templates/               # Kubernetes manifests
-    ├── deployment.yaml
-    ├── service.yaml
-    ├── ingress.yaml
-    └── ...
-```
 
-## 🛠️ Script Details
-
-### Main Orchestration Script (`scripts/main.sh`)
-The primary automation tool that handles the complete onboarding workflow:
-
+### **Expected CI/CD Tags**
 ```bash
-# Usage
-./scripts/main.sh                    # Process all applications
-./scripts/main.sh MyApplication      # Process specific application
+# For each microservice, build with SHA-based tags:
+aryanpola/sample-application:backend-abc123f   # Backend service
+aryanpola/sample-application:frontend-def456a  # Frontend service  
+aryanpola/sample-application:api-xyz789b       # API service
 ```
 
-**What it does:**
-1. 🔄 Syncs application repositories
-2. ⚙️ Generates ArgoCD application manifests
-3. 📋 Detects changes and creates smart commit messages
-4. 🌿 Switches to testing branch
-5. 💾 Commits changes with descriptive messages
-6. 🚀 Pushes to remote repository
+## 🔑 Security & RBAC
 
-### Repository Sync Script (`scripts/sync-app-repos.sh`)
-Manages local copies of all application repositories:
+### **Tenant Isolation**
+Each tenant gets:
+- **Dedicated namespaces**: `{tenant}-{env}` (e.g., `acme-corp-dev`)
+- **Resource quotas**: CPU, memory, storage limits
+- **Network policies**: Isolated network segments  
+- **Service accounts**: `{tenant}-automation` with namespace-level permissions
+- **ArgoCD project**: Can only deploy from tenant's GitHub org
 
-- Clones new repositories from `application-sources.txt`
-- Updates existing repositories with latest changes
-- Supports branch-specific cloning (e.g., `/tree/testing`)
-- Stores clones in `local-app-repos/` (gitignored)
+### **Secrets Management**
+- **ArgoCD Image Updater**: Uses `argocd-image-updater-git-secret.yaml` for Git write-back
+- **Repository Access**: Configure private repos in ArgoCD UI
+- **Tenant Secrets**: Managed within tenant namespaces
 
-### ArgoCD Generator Script (`scripts/generate-argocd-applications.sh`)
-Creates production-grade ArgoCD application manifests:
+## 📊 Operational Commands
 
-- Reads `platform-requirements.yml` from application repositories
-- Generates environment-specific ArgoCD applications
-- Includes ArgoCD Image Updater configuration
-- Creates comprehensive metadata and labels
-- Supports both single application and bulk processing
+### **Tenant Management**
+```bash
+# List all tenants
+kubectl get namespaces -l spanda.ai/managed-by=tenant-factory
 
-## 🔒 Security & Best Practices
+# Check tenant resources
+kubectl get resourcequotas -n my-tenant-dev
+kubectl get networkpolicies -n my-tenant-dev  
+kubectl get serviceaccounts -n my-tenant-dev
 
-### Production Safety
-- **Manual Sync**: Production environments require manual approval
-- **Semantic Versioning**: Only allows proper version tags (v1.2.3)
-- **Git Audit Trail**: All changes tracked via git writeback
-- **RBAC**: ArgoCD projects provide security boundaries
+# View tenant ArgoCD project
+kubectl get appproject my-tenant -n argocd
+```
 
-### Secrets Management
-- Application secrets managed in application repositories
-- Platform secrets managed through external secret stores
-- No secrets stored in this configuration repository
+### **Application Management**
+```bash
+# List all applications
+kubectl get applications -n argocd
 
-### Access Control
-- Platform team controls deployment configurations
-- Application teams control source code and Helm charts
-- Clear separation of responsibilities
+# Check application status
+kubectl get app my-app-dev -n argocd
 
-## 📊 Monitoring & Observability
+# Force sync application
+kubectl patch app my-app-dev -n argocd -p '{"operation":{"sync":{}}}' --type merge
 
-### ArgoCD Dashboard
-- View application sync status
-- Monitor deployment health
-- Track sync history and errors
+# View application logs
+kubectl logs -n my-tenant-dev deployment/my-app-backend
+```
 
-### Application Health
-Applications are configured with:
-- **Liveness probes**: `/health` endpoint
-- **Readiness probes**: Application-specific health checks
-- **Metrics**: Prometheus integration for monitoring
+### **Platform Services**
+```bash
+# Check platform infrastructure
+kubectl get pods -n platform-networking
+kubectl get pods -n platform-security  
+kubectl get pods -n platform-data
+
+# View ArgoCD projects
+kubectl get appprojects -n argocd
+```
+
+## 🎯 Benefits
+
+### **For Platform Teams**
+- ✅ **Centralized Control**: Single source of truth for all deployments
+- ✅ **Multi-Tenant Security**: Isolated tenant environments with RBAC
+- ✅ **Automated Onboarding**: Script-driven tenant and application onboarding
+- ✅ **GitOps Workflow**: All changes tracked and auditable
+
+### **For Development Teams**  
+- ✅ **Self-Service**: Add applications via simple configuration
+- ✅ **Automatic Deployments**: Image updates trigger automatic deployments
+- ✅ **Microservice Support**: Auto-discovery of services in repository
+- ✅ **Environment Consistency**: Same configuration across dev/staging/prod
+
+### **For Operations**
+- ✅ **Resource Governance**: Tenant quotas prevent resource exhaustion
+- ✅ **Network Security**: Isolated tenant networks with policies
+- ✅ **Observability**: Rich metadata and monitoring integration
+- ✅ **Disaster Recovery**: Git-based infrastructure enables quick recovery
 
 ## 🆘 Troubleshooting
 
-### Common Issues
+### **Common Issues**
 
-#### Repository Clone Failures
+#### Missing Dependencies
 ```bash
-# Clean and re-sync specific repository
-rm -rf local-app-repos/problematic-app
-./scripts/sync-app-repos.sh
+# Check required tools
+yq --version
+kubectl version --client
+curl --version
+
+# Install missing tools
+winget install mikefarah.yq  # Windows
+brew install yq             # macOS  
+sudo apt install yq         # Ubuntu
 ```
 
-#### Missing platform-requirements.yml
+#### Application Generation Failures
 ```bash
-# Check application repository structure
-ls -la local-app-repos/app-name/
+# Check platform-requirements.yml format
+yq eval . Test-Application/platform-requirements.yml
+
+# Verify repository access
+curl -s https://api.github.com/repos/my-org/my-app/contents/platform-requirements.yml
+
+# Check application-sources.txt format
+cat application-sources.txt
 ```
 
 #### ArgoCD Sync Issues
 ```bash
-# Check application status
-kubectl get applications -n argocd
-kubectl describe application app-name-dev -n argocd
-```
+# Check application events
+kubectl describe app my-app-dev -n argocd
 
-#### Image Update Issues
-```bash
-# Check ArgoCD Image Updater logs
+# View ArgoCD logs  
+kubectl logs -n argocd deployment/argocd-application-controller
+
+# Check Image Updater logs
 kubectl logs -n argocd deployment/argocd-image-updater
 ```
 
-### Getting Help
+#### Tenant Access Issues
+```bash
+# Verify tenant project permissions
+kubectl describe appproject my-tenant -n argocd
 
-1. **Check application README**: Each app has specific documentation
-2. **Review ArgoCD logs**: Application sync and health status
-3. **Validate Helm charts**: Use `helm template` to test locally
-4. **Platform team**: Contact for configuration repository issues
+# Check namespace RBAC
+kubectl describe role my-tenant-automation -n my-tenant-dev
 
-## 🎉 Key Benefits
-
-### For Platform Team
-- ✅ **Centralized Control**: Single source of truth for deployments
-- ✅ **Automation**: Reduced manual work and human errors
-- ✅ **Consistency**: All applications follow same patterns
-- ✅ **Security**: Production safety with manual approvals
-- ✅ **Scalability**: Easy to onboard new applications
-
-### For Development Teams
-- ✅ **Autonomy**: Full control over source code and Helm charts
-- ✅ **Visibility**: Clear deployment status and history
-- ✅ **Speed**: Automated image updates for faster releases
-- ✅ **Safety**: Production controls prevent accidental deployments
-
-### For Operations
-- ✅ **GitOps**: Declarative, version-controlled infrastructure
-- ✅ **Observability**: Rich metadata and monitoring integration
-- ✅ **Disaster Recovery**: Git history enables quick rollbacks
-- ✅ **Compliance**: Audit trail of all changes
+# Validate resource quotas
+kubectl describe resourcequota -n my-tenant-dev
+```
 
 ---
 
-## 🚀 Quick Start
+**🎉 Ready to deploy? Start with the Quick Start Guide above!**
 
-1. **Add your application** to `application-sources.txt`
-2. **Run the main script**: `./scripts/main.sh`
-3. **Review changes** in the testing branch
-4. **Merge to main** to deploy via ArgoCD
-
-The platform handles the rest automatically! 🎉
