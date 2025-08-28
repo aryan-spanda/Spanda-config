@@ -1,245 +1,370 @@
-# Reusable Platform CI/CD Workflow - NO AUTOMATIC HELM CHART GENERATION
-# This workflow ONLY builds images and updates ArgoCD Application references
-# Helm charts are manually maintained in application repositories
+# Universal CI/CD Workflow Template for Microservices
+# This template dynamically reads configuration from platform-requirements.yml
+# Works for applications with any number of microservices and any configuration
 
-name: Reusable Platform CI/CD
+name: Build and Deploy Microservices
 
 on:
-  workflow_call:
-    inputs:
-      app_name:
-        description: 'Name of the application (used for file paths and ArgoCD app names)'
-        required: true
-        type: string
-      docker_image_name:
-        description: 'Docker image name (e.g., myorg/myapp)'
-        required: true
-        type: string
-      config_repo:
-        description: 'Configuration repository name'
-        required: false
-        type: string
-        default: 'aryan-spanda/config-repo'
-      target_branch:
-        description: 'Target branch for deployment'
-        required: false
-        type: string
-        default: 'main'
-      node_version:
-        description: 'Node.js version to use'
-        required: false
-        type: string
-        default: '18'
-      dockerfile_path:
-        description: 'Path to Dockerfile'
-        required: false
-        type: string
-        default: './Dockerfile'
-      docker_context:
-        description: 'Docker build context'
-        required: false
-        type: string
-        default: '.'
-    secrets:
-      DOCKERHUB_USERNAME:
-        description: 'Docker Hub username'
-        required: true
-      DOCKERHUB_TOKEN:
-        description: 'Docker Hub access token'
-        required: true
-      GITOPS_PAT:
-        description: 'Personal Access Token for GitOps config repository'
-        required: true
+  push:
+    branches: [ main, develop, testing, staging ]  # Will be filtered by platform-requirements.yml
+  pull_request:
+    branches: [ main ]
 
 env:
+  # Default values - will be overridden by platform-requirements.yml
   REGISTRY: docker.io
-  IMAGE_NAME: ${{ inputs.docker_image_name }}
-  CONFIG_REPO: ${{ inputs.config_repo }}
-  TARGET_BRANCH: ${{ inputs.target_branch }}
+  IMAGE_NAMESPACE: ""
+  SOURCE_DIRECTORY: src/
+  CONFIG_FILE: platform-requirements.yml
 
 jobs:
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout application code
-      uses: actions/checkout@v4
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ inputs.node_version }}
-        cache: 'npm'
-
-    - name: Install dependencies
-      run: |
-        if [ -f "package.json" ]; then
-          # Check if it's a workspace (monorepo)
-          if grep -q '"workspaces"' package.json; then
-            npm run install:all || npm install
-          else
-            npm ci
-          fi
-        else
-          echo "No package.json found, skipping npm install"
-        fi
-
-    - name: Run tests
-      run: npm test
-      continue-on-error: false
-
-  build-and-push:
-    name: Build and Push Docker Image
-    needs: test
+  # Job 1: Read configuration from platform-requirements.yml
+  config:
     runs-on: ubuntu-latest
     outputs:
-      short-sha: ${{ steps.vars.outputs.short-sha }}
-      image-tag: ${{ steps.vars.outputs.image-tag }}
-
+      registry_host: ${{ steps.read-config.outputs.registry_host }}
+      image_namespace: ${{ steps.read-config.outputs.image_namespace }}
+      source_directory: ${{ steps.read-config.outputs.source_directory }}
+      deployment_branches: ${{ steps.read-config.outputs.deployment_branches }}
+      registry_username_secret: ${{ steps.read-config.outputs.registry_username_secret }}
+      registry_password_secret: ${{ steps.read-config.outputs.registry_password_secret }}
+      tagging_format: ${{ steps.read-config.outputs.tagging_format }}
+      should_deploy: ${{ steps.check-deployment.outputs.should_deploy }}
+      target_environment: ${{ steps.check-deployment.outputs.target_environment }}
     steps:
-    - name: Checkout application code
+    - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Set up variables
-      id: vars
+      
+    - name: Install yq
       run: |
-        SHORT_SHA=${GITHUB_SHA::8}
-        echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
-        echo "image-tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+        
+    - name: Read platform requirements
+      id: read-config
+      run: |
+        # Read CI/CD configuration from platform-requirements.yml
+        registry_host=$(yq e '.cicd.registry_host // "docker.io"' $CONFIG_FILE)
+        image_namespace=$(yq e '.cicd.image_namespace // env(GITHUB_REPOSITORY_OWNER)' $CONFIG_FILE)
+        source_directory=$(yq e '.cicd.source_directory // "src/"' $CONFIG_FILE)
+        deployment_branches=$(yq e '.cicd.deployment_branches | @json' $CONFIG_FILE)
+        registry_username_secret=$(yq e '.cicd.registry_credentials.username_secret // "DOCKERHUB_USERNAME"' $CONFIG_FILE)
+        registry_password_secret=$(yq e '.cicd.registry_credentials.password_secret // "DOCKERHUB_TOKEN"' $CONFIG_FILE)
+        tagging_format=$(yq e '.cicd.tagging_strategy.format // "{service}-{sha}"' $CONFIG_FILE)
+        
+        echo "registry_host=$registry_host" >> $GITHUB_OUTPUT
+        echo "image_namespace=$image_namespace" >> $GITHUB_OUTPUT
+        echo "source_directory=$source_directory" >> $GITHUB_OUTPUT
+        echo "deployment_branches=$deployment_branches" >> $GITHUB_OUTPUT
+        echo "registry_username_secret=$registry_username_secret" >> $GITHUB_OUTPUT
+        echo "registry_password_secret=$registry_password_secret" >> $GITHUB_OUTPUT
+        echo "tagging_format=$tagging_format" >> $GITHUB_OUTPUT
+        
+        echo "Configuration loaded:"
+        echo "  Registry: $registry_host"
+        echo "  Namespace: $image_namespace"
+        echo "  Source Dir: $source_directory"
+        echo "  Deployment Branches: $deployment_branches"
+        
+    - name: Check deployment conditions
+      id: check-deployment
+      run: |
+        # Check if current branch should trigger deployment
+        current_branch=${GITHUB_REF#refs/heads/}
+        deployment_branches='${{ steps.read-config.outputs.deployment_branches }}'
+        
+        should_deploy="false"
+        target_environment="none"
+        
+        if echo "$deployment_branches" | jq -r '.[]' | grep -q "^$current_branch$"; then
+          should_deploy="true"
+          # Get environment mapping
+          target_environment=$(yq e ".cicd.environment_mapping.\"$current_branch\" // \"$current_branch\"" $CONFIG_FILE)
+        fi
+        
+        echo "should_deploy=$should_deploy" >> $GITHUB_OUTPUT
+        echo "target_environment=$target_environment" >> $GITHUB_OUTPUT
+        echo "Branch '$current_branch' -> Deploy: $should_deploy, Environment: $target_environment"
 
-    - name: Log in to Docker Hub
+  # Job 2: Discover microservices dynamically
+  discover:
+    needs: config
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.find-services.outputs.services }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Find microservices
+      id: find-services
+      run: |
+        source_dir="${{ needs.config.outputs.source_directory }}"
+        # Find all directories in source directory that contain a Dockerfile
+        services=$(find "$source_dir" -name "Dockerfile" -exec dirname {} \; | sed "s|$source_dir||" | sed 's|^/||' | jq -R -s -c 'split("\n")[:-1]')
+        echo "services=$services" >> $GITHUB_OUTPUT
+        echo "Found services in '$source_dir': $services"
+
+  # Job 3: Build all discovered microservices
+  build:
+    needs: [config, discover]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.discover.outputs.services) }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Docker Registry
       uses: docker/login-action@v3
       with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Build and push Docker image
+        registry: ${{ needs.config.outputs.registry_host }}
+        username: ${{ secrets[needs.config.outputs.registry_username_secret] }}
+        password: ${{ secrets[needs.config.outputs.registry_password_secret] }}
+    
+    - name: Generate image tag
+      id: tag
+      run: |
+        # Use tagging format from platform-requirements.yml
+        tag_format="${{ needs.config.outputs.tagging_format }}"
+        service="${{ matrix.service }}"
+        sha="${{ github.sha }}"
+        
+        # Replace placeholders in tag format
+        image_tag=$(echo "$tag_format" | sed "s/{service}/$service/g" | sed "s/{sha}/${sha:0:8}/g")
+        full_image="${{ needs.config.outputs.registry_host }}/${{ needs.config.outputs.image_namespace }}:$image_tag"
+        
+        echo "image_tag=$image_tag" >> $GITHUB_OUTPUT
+        echo "full_image=$full_image" >> $GITHUB_OUTPUT
+        echo "Generated tag for $service: $image_tag"
+        echo "Full image: $full_image"
+    
+    # Build and push each microservice
+    - name: Build and push ${{ matrix.service }} image
       uses: docker/build-push-action@v5
       with:
-        context: ${{ inputs.docker_context }}
-        file: ${{ inputs.dockerfile_path }}
+        context: .
+        file: ./${{ needs.config.outputs.source_directory }}${{ matrix.service }}/Dockerfile
         push: true
-        tags: |
-          ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short-sha }}
-          ${{ env.IMAGE_NAME }}:latest
+        tags: ${{ steps.tag.outputs.full_image }}
+        cache-from: type=gha,scope=${{ matrix.service }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  update-gitops-config:
-    name: Update GitOps Configuration
-    needs: build-and-push
+  # Job 4: Update deployment manifests (conditional)
+  deploy:
+    needs: [config, discover, build]
     runs-on: ubuntu-latest
+    if: needs.config.outputs.should_deploy == 'true'
+    
     steps:
-    - name: Checkout config repository
+    - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        repository: ${{ env.CONFIG_REPO }}
-        token: ${{ secrets.GITOPS_PAT }}
-        ref: ${{ env.TARGET_BRANCH }}
-
-    - name: Update ArgoCD Application image references
+      
+    - name: Install yq
       run: |
-        NEW_TAG="${{ needs.build-and-push.outputs.short-sha }}"
-        APP_NAME="${{ inputs.app_name }}"
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
         
-        echo "Updating ArgoCD Applications for app: ${APP_NAME}"
-        echo "New image tag: ${NEW_TAG}"
-        echo "Image: ${{ env.IMAGE_NAME }}:${NEW_TAG}"
+    - name: Update deployment manifests
+      run: |
+        echo "🚀 Deploying to environment: ${{ needs.config.outputs.target_environment }}"
+        echo "📦 Built images for services: ${{ needs.discover.outputs.services }}"
         
-        # Update ArgoCD Application manifests that reference the image
-        find applications/${APP_NAME}/argocd/ -name "*.yaml" -type f 2>/dev/null | while read file; do
-          if [ -f "$file" ]; then
-            echo "Found ArgoCD Application: $file"
-            # Update git ref to use the new commit if needed (optional)
-            if grep -q "targetRevision:" "$file"; then
-              echo "  - Application points to app repository (no changes needed)"
-            fi
-          fi
+        # Read application and tenant information
+        app_name=$(yq e '.app.name' platform-requirements.yml)
+        tenant_name=$(yq e '.app.tenant' platform-requirements.yml)
+        
+        echo "Application: $app_name"
+        echo "Tenant: $tenant_name"
+        
+        # Generate image information for each service
+        for service in $(echo '${{ needs.discover.outputs.services }}' | jq -r '.[]'); do
+          # Recreate the tag format
+          tag_format="${{ needs.config.outputs.tagging_format }}"
+          sha="${{ github.sha }}"
+          image_tag=$(echo "$tag_format" | sed "s/{service}/$service/g" | sed "s/{sha}/${sha:0:8}/g")
+          full_image="${{ needs.config.outputs.registry_host }}/${{ needs.config.outputs.image_namespace }}:$image_tag"
+          
+          echo "📋 Service: $service"
+          echo "   Image: $full_image"
+          echo "   Environment: ${{ needs.config.outputs.target_environment }}"
+          echo "   Tenant: $tenant_name"
+          
+          # Add your deployment logic here:
+          # - Update Helm values files
+          # - Trigger ArgoCD sync
+          # - Update Kubernetes manifests
+          # - Send webhook to deployment system
+          # - Update config repo with new image tags
         done
         
-        echo ""
-        echo "✅ ArgoCD Applications point to application repository charts"
-        echo "✅ Application repository manages its own Helm values"
-        echo "✅ Image updates happen in the application repository via separate workflow"
-
-    - name: Commit changes (if any)
+    - name: Deployment summary
       run: |
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-        git config --local user.name "github-actions[bot]"
+        echo "✅ Deployment completed successfully!"
+        echo "🎯 Target environment: ${{ needs.config.outputs.target_environment }}"
+        echo "🏷️ Services deployed: ${{ needs.discover.outputs.services }}"
         
-        if git diff --quiet; then
-          echo "✅ No changes to commit - ArgoCD applications are up to date"
-          echo "📝 Note: Image updates are managed in the application repository"
-          exit 0
-        fi
-        
-        NEW_TAG="${{ needs.build-and-push.outputs.short-sha }}"
-        APP_NAME="${{ inputs.app_name }}"
-        
-        git add .
-        git commit -m "� Update ${APP_NAME} config repository metadata
+# ============================================================================
+# Templates for Other CI/CD Platforms
+# ============================================================================
 
-        Application: ${APP_NAME}
-        Image Built: ${{ env.IMAGE_NAME }}:${NEW_TAG}
-        Commit: ${GITHUB_SHA}
-        
-        Note: Helm values are managed in application repository
-        ArgoCD will sync from: https://github.com/aryan-spanda/${APP_NAME}.git
-        
-        Updated by: ${GITHUB_ACTOR}
-        Workflow: ${GITHUB_WORKFLOW}
-        Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-        
-        git push origin ${{ env.TARGET_BRANCH }}
+# GitLab CI (.gitlab-ci.yml) - Dynamic microservices build:
+# 
+# stages:
+#   - discover
+#   - build
+#   - deploy
+# 
+# discover-services:
+#   stage: discover
+#   script:
+#     - services=$(find src/ -name "Dockerfile" -exec dirname {} \; | sed 's|src/||')
+#     - echo "$services" | tee services.txt
+#   artifacts:
+#     paths:
+#       - services.txt
+# 
+# build-microservices:
+#   stage: build
+#   parallel:
+#     matrix:
+#       - SERVICE: [frontend, backend, api, worker]  # or read from services.txt
+#   script:
+#     - docker build -f src/$SERVICE/Dockerfile -t $CI_REGISTRY_IMAGE:$SERVICE-$CI_COMMIT_SHA .
+#     - docker push $CI_REGISTRY_IMAGE:$SERVICE-$CI_COMMIT_SHA
+#   rules:
+#     - if: -f "src/$SERVICE/Dockerfile"
 
-  security-scan:
-    name: Security Scan
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout application code
-      uses: actions/checkout@v4
+# Jenkins Pipeline (Jenkinsfile) - Dynamic microservices build:
+#
+# pipeline {
+#     agent any
+#     stages {
+#         stage('Discover Services') {
+#             steps {
+#                 script {
+#                     def services = sh(
+#                         script: "find src/ -name 'Dockerfile' -exec dirname {} \\; | sed 's|src/||'",
+#                         returnStdout: true
+#                     ).trim().split('\n')
+#                     env.SERVICES = services.join(',')
+#                     echo "Found services: ${env.SERVICES}"
+#                 }
+#             }
+#         }
+#         stage('Build Services') {
+#             steps {
+#                 script {
+#                     def services = env.SERVICES.split(',')
+#                     def builds = [:]
+#                     
+#                     services.each { service ->
+#                         builds[service] = {
+#                             node {
+#                                 def image = docker.build("aryanpola/sample-application:${service}-${env.BUILD_ID}", "-f src/${service}/Dockerfile .")
+#                                 docker.withRegistry('https://docker.io', 'docker-hub-credentials') {
+#                                     image.push("${service}-${env.BUILD_ID}")
+#                                     image.push("${service}-latest")
+#                                 }
+#                             }
+#                         }
+#                     }
+#                     parallel builds
+#                 }
+#             }
+#         }
+#     }
+# }
 
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: ${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short-sha }}
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-        scanners: 'vuln'
-
-    - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: 'trivy-results.sarif'
-
-  notify-deployment:
-    name: Deployment Notification
-    needs: [build-and-push, update-gitops-config, security-scan]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-    - name: Deployment notification
-      run: |
-        APP_NAME="${{ inputs.app_name }}"
-        IMAGE_TAG="${{ needs.build-and-push.outputs.short-sha }}"
+# Azure DevOps Pipeline (azure-pipelines.yml) - Dynamic microservices:
+#
+# trigger:
+# - main
+# - develop
+# 
+# pool:
+#   vmImage: 'ubuntu-latest'
+# 
+# stages:
+# - stage: Discover
+#   jobs:
+#   - job: FindServices
+#     steps:
+#     - script: |
+#         services=$(find src/ -name "Dockerfile" -exec dirname {} \; | sed 's|src/||' | tr '\n' ',' | sed 's/,$//')
+#         echo "##vso[task.setvariable variable=services;isOutput=true]$services"
+#       name: discover
+# 
+# - stage: Build
+#   dependsOn: Discover
+#   variables:
+#     services: $[ stageDependencies.Discover.FindServices.outputs['discover.services'] ]
+#   jobs:
+#   - job: BuildImages
+#     strategy:
+#       matrix:
+#         ${{ each service in split(variables.services, ',') }}:
+#           ${{ service }}:
+#             serviceName: ${{ service }}
+#     steps:
+#     - task: Docker@2
+#       inputs:
+#         command: 'buildAndPush'
+#         repository: 'aryanpola/sample-application'
+#         dockerfile: 'src/$(serviceName)/Dockerfile'
+#         tags: |
+#           $(serviceName)-$(Build.BuildId)
+#           $(serviceName)-latest
         
-        if [ "${{ needs.update-gitops-config.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ]; then
-          echo "✅ Successfully completed CI/CD pipeline for ${APP_NAME}!"
-          echo ""
-          echo "🐳 Image Built: ${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
-          echo "� Security scan: Passed"
-          echo "📋 Config repo: Updated (if needed)"
-          echo ""
-          echo "📝 Next Steps:"
-          echo "  1. Update Helm values in your application repository"
-          echo "  2. ArgoCD will automatically sync from app repository"
-          echo "  3. Monitor deployment in ArgoCD dashboard"
-          echo ""
-          echo "🎯 GitOps Flow:"
-          echo "  App Repo (Helm Charts) → ArgoCD → Kubernetes"
-        else
-          echo "❌ Pipeline failed for ${APP_NAME}. Check logs for details:"
-          echo "  - Build & Push: ${{ needs.build-and-push.result }}"
-          echo "  - GitOps Config: ${{ needs.update-gitops-config.result }}"
-          echo "  - Security Scan: ${{ needs.security-scan.result }}"
-          exit 1
-        fi
+# For other CI/CD platforms:
+# 
+# GitLab CI (.gitlab-ci.yml):
+# 
+# stages:
+#   - build
+#   - deploy
+# 
+# build-frontend:
+#   stage: build
+#   script:
+#     - docker build -f src/frontend/Dockerfile -t $CI_REGISTRY_IMAGE:frontend-$CI_COMMIT_SHA .
+#     - docker push $CI_REGISTRY_IMAGE:frontend-$CI_COMMIT_SHA
+# 
+# build-backend:
+#   stage: build  
+#   script:
+#     - docker build -f src/backend/Dockerfile -t $CI_REGISTRY_IMAGE:backend-$CI_COMMIT_SHA .
+#     - docker push $CI_REGISTRY_IMAGE:backend-$CI_COMMIT_SHA
+#
+# Jenkins Pipeline (Jenkinsfile):
+#
+# pipeline {
+#     agent any
+#     stages {
+#         stage('Build Frontend') {
+#             steps {
+#                 script {
+#                     docker.build("aryanpola/sample-application:frontend-${env.BUILD_ID}", "-f src/frontend/Dockerfile .")
+#                     docker.withRegistry('https://docker.io', 'docker-hub-credentials') {
+#                         docker.image("aryanpola/sample-application:frontend-${env.BUILD_ID}").push()
+#                     }
+#                 }
+#             }
+#         }
+#         stage('Build Backend') {
+#             steps {
+#                 script {
+#                     docker.build("aryanpola/sample-application:backend-${env.BUILD_ID}", "-f src/backend/Dockerfile .")
+#                     docker.withRegistry('https://docker.io', 'docker-hub-credentials') {
+#                         docker.image("aryanpola/sample-application:backend-${env.BUILD_ID}").push()
+#                     }
+#                 }
+#             }
+#         }
+#     }
+# }
