@@ -6,6 +6,21 @@
 # from application repositories via GitHub API. Supports unlimited microservices
 # using a SINGLE Docker Hub repository for all services!
 #
+# MICROSERVICES ARCHITECTURE OVERVIEW:
+# ====================================
+# 
+# Service Discovery Strategy:
+# - Auto-discovers services by scanning src/ directories for Dockerfiles
+# - Supports explicit service definition in platform-requirements.yml
+# - Handles 1 to N microservices with same configuration approach
+# - Example: frontend/, backend/, worker/ → 3 services auto-detected
+#
+# Docker Image Strategy (Single Repository):
+# - Repository: aryanpola/sample-application (one repo for all services)
+# - Service-specific tags: frontend-{sha}, backend-{sha}, worker-{sha}
+# - Smart tag filtering: Each service ignores other services' tags
+# - ArgoCD Image Updater handles automatic deployments per service
+#
 # Expected CI/CD Image Tags (Single Repository):
 # - <service>-<branch>-latest (branch-specific latest)
 # - <service>-<branch>-<sha> (specific commit builds)
@@ -15,9 +30,11 @@
 # - staging: Tracks SHA-based tags from staging branch (backend-<sha>, frontend-<sha>)  
 # - production: Tracks SHA-based tags from main branch (backend-<sha>, frontend-<sha>)
 #
-# Single Docker Hub Repository: aryanpola/sample-application
-# All services use the same repository with service-specific SHA tags
-# All environments use SHA-based tags for precise versioning
+# Tenant-Aware Multi-Service Deployment:
+# - Namespace: {tenant}-{app}-{environment}
+# - Project: {tenant}-applications  
+# - Dynamic Helm parameters for each discovered service
+# - Platform services integration for shared infrastructure
 #
 # Author: Spanda AI DevOps Team
 # Version: 7.0 (SHA-Based Tags - All Environments Use Commit SHA Tags + Newest-Build Strategy)
