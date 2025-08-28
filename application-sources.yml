@@ -1,0 +1,46 @@
+---
+# SpandaAI Platform - Application Sources Configuration
+# This YAML file defines all application repositories to be managed by the platform.
+# Add new applications here to onboard them into the GitOps workflow.
+
+applications:
+  - name: "test-application"
+    description: "Test application for multi-tenant platform demonstration"
+    git:
+      url: "https://github.com/aryan-spanda/Test-Application"
+      branch: "testing"
+      path: "."
+    tenant:
+      name: "test-application-2" # namespace, just for reference, not using anywhere
+    config:
+      auto_discovery: true
+      image_updater: true
+      sync_policy: "automated"
+
+  # Example: Add more applications below
+  # - name: "another-app"
+  #   description: "Another application for the platform"
+  #   git:
+  #     url: "https://github.com/your-org/another-app"
+  #     branch: "main"
+  #     path: "."
+  #   tenant:
+  #     name: "example-startup"
+  #   config:
+  #     auto_discovery: true
+  #     image_updater: true
+  #     sync_policy: "manual"
+
+# Configuration Schema:
+# - name: Unique identifier for the application
+# - description: Human-readable description
+# - git.url: GitHub repository URL
+# - git.branch: Branch to track for deployments
+# - git.path: Path within repository (usually ".")
+# - tenant.name: Tenant name (must exist in tenant-sources.yml)
+# - config.auto_discovery: Enable automatic microservice discovery
+# - config.image_updater: Enable ArgoCD Image Updater
+# - config.sync_policy: "automated" or "manual"
+#
+# NOTE: Docker/container configuration is read from platform-requirements.yml
+# in the application repository, not from this file.

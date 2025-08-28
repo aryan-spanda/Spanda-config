@@ -26,7 +26,8 @@ set -euo pipefail
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCES_FILE="$BASE_DIR/application-sources.txt"
+SOURCES_YAML="$BASE_DIR/application-sources.yml"
+SOURCES_TXT="$BASE_DIR/application-sources.txt"
 
 # Colors for output
 RED='\033[0;31m'
@@ -715,69 +716,169 @@ EOF
     success "Created ArgoCD Image Updater config: $config_file"
 }
 
-# Main function - Direct API access (no cloning required)
-main() {
-    if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-        show_usage
-        return 0
+# Function to get tenant environments from tenant-sources.yml
+get_tenant_environments() {
+    local tenant_name="$1"
+    local tenant_sources_file="../tenants/tenant-sources.yml"
+    
+    if [[ ! -f "$tenant_sources_file" ]]; then
+        error "❌ Tenant sources file not found: $tenant_sources_file"
+        return 1
     fi
     
-    local apply_mode=false
-    if [[ "${1:-}" == "--apply" ]]; then
-        apply_mode=true
-        log "🚀 Single Repository Application Generator v5.0 (Apply Mode)"
+    # Find the tenant and get its environments
+    local tenant_count=$(yq eval '.tenants | length' "$tenant_sources_file")
+    for ((t=0; t<tenant_count; t++)); do
+        local current_tenant=$(yq eval ".tenants[$t].name" "$tenant_sources_file")
+        if [[ "$current_tenant" == "$tenant_name" ]]; then
+            yq eval ".tenants[$t].environments[]" "$tenant_sources_file"
+            return 0
+        fi
+    done
+    
+    error "❌ Tenant '$tenant_name' not found in $tenant_sources_file"
+    return 1
+}
+
+# Function to determine which sources file to use
+determine_sources_file() {
+    if [[ -f "$SOURCES_YAML" ]]; then
+        echo "$SOURCES_YAML"
+    elif [[ -f "$SOURCES_TXT" ]]; then
+        echo "$SOURCES_TXT"
     else
-        log "🚀 Single Repository Application Generator v5.0 (Generate Mode)"
+        return 1
     fi
-    echo "=================================================================="
+}
+
+# Function to process YAML application sources
+process_yaml_applications() {
+    local sources_file="$1"
+    local apply_mode="$2"
     
-    # Install dependencies if needed
-    if ! install_dependencies; then
-        error "Failed to install required dependencies. Please install them manually and try again."
-        exit 1
-    fi
-    
-    # Check dependencies (final verification)
-    local missing_deps=()
-    if ! command -v yq &> /dev/null; then
-        missing_deps+=("yq")
-    fi
-    
-    if ! command -v curl &> /dev/null; then
-        missing_deps+=("curl")
-    fi
-    
-    if ! command -v jq &> /dev/null; then
-        missing_deps+=("jq")
-    fi
-    
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        error "The following dependencies are still missing: ${missing_deps[*]}"
-        error "Please install them manually:"
-        for dep in "${missing_deps[@]}"; do
-            case "$dep" in
-                "curl") error "  • curl: https://curl.se/download.html" ;;
-                "jq") error "  • jq: https://jqlang.github.io/jq/download/" ;;
-                "yq") error "  • yq: https://github.com/mikefarah/yq#install" ;;
-            esac
-        done
-        exit 1
-    fi
-    
-    # Check if application sources file exists
-    if [[ ! -f "$SOURCES_FILE" ]]; then
-        error "Application sources file not found: $SOURCES_FILE"
-        error "Please create this file and add application repository URLs to it."
-        exit 1
-    fi
-    
-    log "📖 Reading application sources from: $SOURCES_FILE"
+    log "📖 Processing YAML application sources from: $sources_file"
     
     local app_count=0
     local env_count=0
     local total_apps_generated=0
     
-    # Process each repository URL from application-sources.txt
+    # Get the number of applications
+    local num_apps=$(yq eval '.applications | length' "$sources_file")
+    
+    if [[ "$num_apps" == "0" || "$num_apps" == "null" ]]; then
+        warn "No applications found in $sources_file"
+        return 0
+    fi
+    
+    log "Found $num_apps applications in configuration"
+    
+    # Process each application
+    for ((i=0; i<num_apps; i++)); do
+        local app_name=$(yq eval ".applications[$i].name" "$sources_file")
+        local app_description=$(yq eval ".applications[$i].description" "$sources_file")
+        local git_url=$(yq eval ".applications[$i].git.url" "$sources_file")
+        local git_branch=$(yq eval ".applications[$i].git.branch" "$sources_file")
+        local tenant_name=$(yq eval ".applications[$i].tenant.name" "$sources_file")
+        local auto_discovery=$(yq eval ".applications[$i].config.auto_discovery" "$sources_file")
+        
+        # Get environments from tenant configuration
+        local environments=$(get_tenant_environments "$tenant_name")
+        if [[ $? -ne 0 ]]; then
+            warn "⚠️ Failed to get environments for tenant '$tenant_name', skipping application"
+            continue
+        fi
+        
+        log "🔍 Processing application: $app_name"
+        log "  📝 Description: $app_description"
+        log "  📁 Repository: $git_url"
+        log "  🌿 Branch: $git_branch"
+        log "  🏢 Tenant: $tenant_name"
+        
+        app_count=$((app_count + 1))
+        
+        # Validate repository structure
+        local repo_name=$(basename "$git_url" .git)
+        if ! validate_repository_structure "$git_url" "$git_branch" "$repo_name"; then
+            warn "⚠️ Skipping $app_name due to validation errors"
+            continue
+        fi
+        
+        # Process each environment
+        while IFS= read -r env; do
+            [[ -z "$env" ]] && continue
+            
+            env_count=$((env_count + 1))
+            log "  🌍 Processing environment: $env"
+            
+            # Use the same processing logic as the text version
+            local namespace="${tenant_name}-${env}"
+            
+            # Fetch platform requirements
+            local api_url=$(echo "$git_url" | sed 's|https://github.com/|https://api.github.com/repos/|')
+            local platform_req_response=$(curl -s "$api_url/contents/platform-requirements.yml?ref=$git_branch")
+            
+            if ! echo "$platform_req_response" | jq -e '.content' >/dev/null 2>&1; then
+                error "Failed to fetch platform-requirements.yml from $git_url"
+                continue
+            fi
+            
+            local platform_config=$(echo "$platform_req_response" | jq -r '.content' | base64 -d)
+            
+            # Validate platform requirements
+            if ! validate_platform_requirements "$platform_config" "$repo_name"; then
+                warn "⚠️ Skipping $env environment for $app_name due to validation errors"
+                continue
+            fi
+            
+            # Generate ArgoCD applications for this environment
+            log "  🔄 Generating $env environment for $app_name"
+            
+            # Create application directory
+            local app_dir="$BASE_DIR/applications/$app_name/argocd"
+            mkdir -p "$app_dir"
+            
+            # Generate ArgoCD application manifest
+            local app_file="$app_dir/app-$env.yaml"
+            generate_simple_app "$git_url" "$git_branch" "$app_name" "$env" "$platform_config" > "$app_file"
+            
+            success "  ✅ Generated: $app_file"
+            total_apps_generated=$((total_apps_generated + 1))
+            
+            # Apply if in apply mode
+            if [[ "$apply_mode" == true ]]; then
+                if kubectl apply -f "$app_file"; then
+                    success "  🚀 Applied ArgoCD application: $app_name-$env"
+                else
+                    error "  ❌ Failed to apply ArgoCD application: $app_name-$env"
+                fi
+            fi
+            
+        done <<< "$environments"
+        
+        log "✅ Completed processing application: $app_name"
+        echo ""
+    done
+    
+    success "📊 YAML Processing Summary:"
+    success "  • Applications processed: $app_count"
+    success "  • ArgoCD applications generated: $total_apps_generated"
+    
+    # Return statistics in the expected format
+    echo "$app_count|$env_count|$total_apps_generated"
+}
+
+# Function to process text application sources (legacy)
+process_text_applications() {
+    local sources_file="$1"
+    local apply_mode="$2"
+    
+    log "📖 Processing text application sources from: $sources_file"
+    
+    local app_count=0
+    local env_count=0
+    local total_apps_generated=0
+    
+    # Process each repository URL from application-sources.txt (legacy format)
     while IFS= read -r repo_line; do
         # Skip empty lines and comments
         [[ -z "$repo_line" || "$repo_line" =~ ^[[:space:]]*# ]] && continue
@@ -801,7 +902,7 @@ main() {
         
         # Validate repository structure
         if ! validate_repository_structure "$repo_url" "$branch" "$repo_name"; then
-            error "Skipping $repo_name due to invalid repository structure"
+            warn "⚠️ Skipping $repo_name due to validation errors"
             continue
         fi
         
@@ -854,9 +955,101 @@ main() {
             fi
         done
         
-        echo "" # Add spacing between repositories
+        log "✅ Completed repository: $repo_name"
+        echo ""
+    done < "$sources_file"
+    
+    success "📊 Text Processing Summary:"
+    success "  • Repositories processed: $app_count"
+    success "  • Environments processed: $env_count"
+    success "  • ArgoCD applications generated: $total_apps_generated"
+    
+    # Return statistics in the expected format
+    echo "$app_count|$env_count|$total_apps_generated"
+}
+
+# Main function - Direct API access (no cloning required)
+main() {
+    if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+        show_usage
+        return 0
+    fi
+    
+    local apply_mode=false
+    if [[ "${1:-}" == "--apply" ]]; then
+        apply_mode=true
+        log "🚀 Single Repository Application Generator v5.0 (Apply Mode)"
+    else
+        log "🚀 Single Repository Application Generator v5.0 (Generate Mode)"
+    fi
+    echo "=================================================================="
+    
+    # Install dependencies if needed
+    if ! install_dependencies; then
+        error "Failed to install required dependencies. Please install them manually and try again."
+        exit 1
+    fi
+    
+    # Check dependencies (final verification)
+    local missing_deps=()
+    if ! command -v yq &> /dev/null; then
+        missing_deps+=("yq")
+    fi
+    
+    if ! command -v curl &> /dev/null; then
+        missing_deps+=("curl")
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        missing_deps+=("jq")
+    fi
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        error "The following dependencies are still missing: ${missing_deps[*]}"
+        error "Please install them manually:"
+        for dep in "${missing_deps[@]}"; do
+            case "$dep" in
+                "curl") error "  • curl: https://curl.se/download.html" ;;
+                "jq") error "  • jq: https://jqlang.github.io/jq/download/" ;;
+                "yq") error "  • yq: https://github.com/mikefarah/yq#install" ;;
+            esac
+        done
+        exit 1
+    fi
+    
+    # Determine and validate sources file
+    local sources_file=$(determine_sources_file)
+    if [[ ! -f "$sources_file" ]]; then
+        error "Application sources file not found: $sources_file"
+        error "Please create either application-sources.yml (YAML format) or application-sources.txt (text format)"
+        exit 1
+    fi
+    
+    log "📖 Using application sources file: $sources_file"
+    
+    local app_count=0
+    local env_count=0
+    local total_apps_generated=0
+    
+    # Detect file format and process accordingly
+    if [[ "$sources_file" == *.yml ]] || [[ "$sources_file" == *.yaml ]]; then
+        log "🎯 Detected YAML format, using structured processing"
         
-    done < "$SOURCES_FILE"
+        # Process YAML format
+        local results=$(process_yaml_applications "$sources_file" "$apply_mode")
+        app_count=$(echo "$results" | cut -d'|' -f1)
+        env_count=$(echo "$results" | cut -d'|' -f2)
+        total_apps_generated=$(echo "$results" | cut -d'|' -f3)
+        
+    else
+        log "� Detected text format, using legacy processing"
+        
+        # Process text format (legacy)
+        local results=$(process_text_applications "$sources_file" "$apply_mode")
+        app_count=$(echo "$results" | cut -d'|' -f1)
+        env_count=$(echo "$results" | cut -d'|' -f2)
+        total_apps_generated=$(echo "$results" | cut -d'|' -f3)
+    fi
     
     # Create and apply ArgoCD Image Updater configuration
     if [[ "$apply_mode" == true ]]; then

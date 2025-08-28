@@ -10,17 +10,17 @@ metadata:
     team: development-team
     environment: production
     app-type: fullstack
-    microservices-count: "2"
+    microservices-count: "1"
   annotations:
     app.spanda.ai/generated: "true"
     app.spanda.ai/generator: "tenant-aware-deployment"
     app.spanda.ai/tenant: test-application-2
     app.spanda.ai/target-namespace: test-application-2-production
-    app.spanda.ai/generated-at: "2025-08-26T14:13:24Z"
-    app.spanda.ai/microservices: "backend,frontend"
+    app.spanda.ai/generated-at: "2025-08-28T07:47:15Z"
+    app.spanda.ai/microservices: "backend"
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater - Using SHA-based tags for reliability
-    argocd-image-updater.argoproj.io/image-list: backend=aryanpola/sample-application,frontend=aryanpola/sample-application
+    argocd-image-updater.argoproj.io/image-list: backend=aryanpola/sample-application
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/write-back-target: helmvalues
@@ -28,17 +28,10 @@ metadata:
     # Backend service configuration - Using SHA-based tags
     argocd-image-updater.argoproj.io/backend.update-strategy: newest-build
     argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^backend-[0-9a-f]{7,40}$
-    argocd-image-updater.argoproj.io/backend.ignore-tags: regexp:^frontend-.*$
+    argocd-image-updater.argoproj.io/backend.ignore-tags: regexp:^-.*$
     argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
     argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
     argocd-image-updater.argoproj.io/backend.force-update: "true"
-    # Frontend service configuration - Using SHA-based tags
-    argocd-image-updater.argoproj.io/frontend.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/frontend.allow-tags: regexp:^frontend-[0-9a-f]{7,40}$
-    argocd-image-updater.argoproj.io/frontend.ignore-tags: regexp:^backend-.*$
-    argocd-image-updater.argoproj.io/frontend.helm.image-name: frontend.image.repository
-    argocd-image-updater.argoproj.io/frontend.helm.image-tag: frontend.image.tag
-    argocd-image-updater.argoproj.io/frontend.force-update: "true"
 spec:
   project: test-application-2  # Use tenant-specific project or fallback to spanda-applications
   source:
@@ -52,8 +45,6 @@ spec:
         - values-production.yaml
       parameters:
         - name: backend.image.repository
-          value: aryanpola/sample-application
-        - name: frontend.image.repository
           value: aryanpola/sample-application
         - name: platform.servicesEnabled
           value: "true"
@@ -87,6 +78,6 @@ spec:
     - name: 'Team'
       value: 'development-team'
     - name: 'Architecture'
-      value: 'Microservices (2 services: backend,frontend)'
+      value: 'Microservices (1 services: backend)'
     - name: 'Discovered Services'
-      value: 'backend,frontend'
+      value: 'backend'

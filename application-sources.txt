@@ -1,4 +1,0 @@
-# List of application repositories to be managed by the platform.
-# Add a new Git URL here to onboard a new application.
-https://github.com/aryan-spanda/Test-Application/tree/testing
-# https://github.com/your-org/another-app.git

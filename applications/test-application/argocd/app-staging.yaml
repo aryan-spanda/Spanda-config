@@ -16,7 +16,7 @@ metadata:
     app.spanda.ai/generator: "tenant-aware-deployment"
     app.spanda.ai/tenant: test-application-2
     app.spanda.ai/target-namespace: test-application-2-staging
-    app.spanda.ai/generated-at: "2025-08-26T14:13:23Z"
+    app.spanda.ai/generated-at: "2025-08-28T07:47:14Z"
     app.spanda.ai/microservices: "backend,frontend"
     app.spanda.ai/uses-platform-services: "true"
     # ArgoCD Image Updater - Using SHA-based tags for reliability

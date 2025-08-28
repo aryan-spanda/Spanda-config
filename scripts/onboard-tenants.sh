@@ -189,7 +189,7 @@ discover_tenants_from_apps() {
             log "  ➕ Adding tenant '$tenant_name' with default quotas"
             
             # Add to tenant-sources.yml
-            yq e ".tenants += [{\"name\": \"$tenant_name\", \"git_org\": \"$git_org\", \"description\": \"Auto-discovered tenant\", \"cpu_quota\": \"$cpu_quota\", \"memory_quota\": \"$memory_quota\", \"storage_quota\": \"$storage_quota\", \"environments\": [\"dev\", \"staging\", \"prod\"]}]" -i "$TENANT_SOURCES_FILE"
+            yq e ".tenants += [{\"name\": \"$tenant_name\", \"git_org\": \"$git_org\", \"description\": \"Auto-discovered tenant\", \"cpu_quota\": \"$cpu_quota\", \"memory_quota\": \"$memory_quota\", \"storage_quota\": \"$storage_quota\", \"environments\": [\"dev\", \"staging\", \"production\"]}]" -i "$TENANT_SOURCES_FILE"
             
             success "  ✅ Added tenant '$tenant_name' to tenant-sources.yml"
         done
