@@ -1,3 +1,12 @@
+# =============================================================================
+# SPANDA APPLICATIONS PROJECT - CLIENT APPLICATION DEPLOYMENT PROJECT
+# =============================================================================
+# Purpose: ArgoCD project for client/tenant applications deployed on the platform
+# Scope: Provides permissive access for client applications with multi-tenant support
+# Security: Limited to application-level resources, no cluster-admin permissions
+# Legacy: Maintains backward compatibility with existing application deployments
+# =============================================================================
+
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
