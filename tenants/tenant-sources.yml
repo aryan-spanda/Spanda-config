@@ -6,7 +6,7 @@
 # ./scripts/onboard-tenants.sh
 # =============================================================================
 
-# TODO -ADD GPU QUOTA
+# TODO -ADD GPU QUOTA ✅ DONE
 tenants:
   # Test Application Tenant (new version to avoid namespace conflict)
   - name: "test-application-2" # namespace name
@@ -15,6 +15,7 @@ tenants:
     cpu_quota: "30"
     memory_quota: "60Gi"
     storage_quota: "150Gi"
+    gpu_quota: "2"
     environments: ["dev", "staging", "production"]
 
   # Example Startup Tenant
@@ -24,6 +25,7 @@ tenants:
     cpu_quota: "20"
     memory_quota: "40Gi"
     storage_quota: "100Gi"
+    gpu_quota: "1"
     environments: ["dev", "staging", "production"]  # New Client Template (uncomment and modify for new clients)
   # - name: "new-client"
   #   git_org: "new-client-org"
@@ -45,3 +47,4 @@ discovery:
     cpu_quota: "15"
     memory_quota: "30Gi"
     storage_quota: "75Gi"
+    gpu_quota: "0"

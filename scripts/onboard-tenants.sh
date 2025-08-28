@@ -43,11 +43,10 @@ info() {
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-# Adjust these paths if your repository structure is different.
-# Assumes the 'spandaai-platform-deployment' repo is at the same level as 'config-repo'.
-TENANT_ONBOARDING_TF_PATH="../spandaai-platform-deployment/bare-metal/examples/tenant-onboarding"
-TENANT_SOURCES_FILE="./tenants/tenant-sources.yml"
-APPLICATION_SOURCES_FILE="./application-sources.txt"
+# Updated to use the tenant infrastructure within the config repo
+TENANT_ONBOARDING_TF_PATH="../tenants/infrastructure"
+TENANT_SOURCES_FILE="../tenants/tenant-sources.yml"
+APPLICATION_SOURCES_FILE="../application-sources.yml"
 
 echo
 log "🚀 Starting Spanda Platform Intelligent Tenant Onboarding..."
@@ -185,11 +184,12 @@ discover_tenants_from_apps() {
             local cpu_quota=$(yq e '.discovery.default_quotas.cpu_quota' "$TENANT_SOURCES_FILE")
             local memory_quota=$(yq e '.discovery.default_quotas.memory_quota' "$TENANT_SOURCES_FILE")
             local storage_quota=$(yq e '.discovery.default_quotas.storage_quota' "$TENANT_SOURCES_FILE")
+            local gpu_quota=$(yq e '.discovery.default_quotas.gpu_quota' "$TENANT_SOURCES_FILE")
             
             log "  ➕ Adding tenant '$tenant_name' with default quotas"
             
             # Add to tenant-sources.yml
-            yq e ".tenants += [{\"name\": \"$tenant_name\", \"git_org\": \"$git_org\", \"description\": \"Auto-discovered tenant\", \"cpu_quota\": \"$cpu_quota\", \"memory_quota\": \"$memory_quota\", \"storage_quota\": \"$storage_quota\", \"environments\": [\"dev\", \"staging\", \"production\"]}]" -i "$TENANT_SOURCES_FILE"
+            yq e ".tenants += [{\"name\": \"$tenant_name\", \"git_org\": \"$git_org\", \"description\": \"Auto-discovered tenant\", \"cpu_quota\": \"$cpu_quota\", \"memory_quota\": \"$memory_quota\", \"storage_quota\": \"$storage_quota\", \"gpu_quota\": \"$gpu_quota\", \"environments\": [\"dev\", \"staging\", \"production\"]}]" -i "$TENANT_SOURCES_FILE"
             
             success "  ✅ Added tenant '$tenant_name' to tenant-sources.yml"
         done
@@ -207,7 +207,8 @@ onboard_tenant() {
     local cpu_quota="$3"
     local memory_quota="$4"
     local storage_quota="$5"
-    local environments="$6"
+    local gpu_quota="$6"
+    local environments="$7"
     
     log "🏗️  Processing tenant: $name"
     
@@ -227,6 +228,7 @@ tenant_git_org = "$git_org"
 cpu_quota      = "$cpu_quota"
 memory_quota   = "$memory_quota"
 storage_quota  = "$storage_quota"
+gpu_quota      = "$gpu_quota"
 EOF
     
     log "  📄 Generated Terraform variables for '$name'"
@@ -305,13 +307,14 @@ for i in $(seq 0 $((tenant_count - 1))); do
     cpu_quota=$(yq e ".tenants[$i].cpu_quota" "$TENANT_SOURCES_FILE")
     memory_quota=$(yq e ".tenants[$i].memory_quota" "$TENANT_SOURCES_FILE")
     storage_quota=$(yq e ".tenants[$i].storage_quota" "$TENANT_SOURCES_FILE")
+    gpu_quota=$(yq e ".tenants[$i].gpu_quota // \"0\"" "$TENANT_SOURCES_FILE")
     environments=$(yq e ".tenants[$i].environments" "$TENANT_SOURCES_FILE")
     
     echo
     log "[$((i+1))/$tenant_count] Processing tenant: $name"
     echo "----------------------------------------"
     
-    if onboard_tenant "$name" "$git_org" "$cpu_quota" "$memory_quota" "$storage_quota" "$environments"; then
+    if onboard_tenant "$name" "$git_org" "$cpu_quota" "$memory_quota" "$storage_quota" "$gpu_quota" "$environments"; then
         successful_tenants+=("$name")
     else
         failed_tenants+=("$name")
