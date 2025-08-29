@@ -156,15 +156,23 @@ discover_tenants_from_apps() {
                     
                     info "  ✨ Found tenant '$tenant_name' in repository (org: $git_org)"
                     
+                    # Extract modules from platform-requirements.yml
+                    local modules_yaml
+                    modules_yaml=$(yq e '.modules' -o=json "$temp_file" 2>/dev/null || echo "[]")
+                    
                     # Check if tenant already exists in tenant-sources.yml
                     local tenant_exists
                     tenant_exists=$(yq e ".tenants[] | select(.name == \"$tenant_name\") | .name" "$TENANT_SOURCES_FILE" 2>/dev/null || echo "")
                     
                     if [[ -z "$tenant_exists" ]]; then
-                        discovered_tenants+=("$tenant_name:$git_org")
-                        info "  🆕 New tenant discovered: $tenant_name"
+                        discovered_tenants+=("$tenant_name:$git_org:$modules_yaml")
+                        info "  🆕 New tenant discovered: $tenant_name with modules"
                     else
                         info "  ✅ Tenant '$tenant_name' already defined in tenant-sources.yml"
+                        # Update modules for existing tenant
+                        log "  🔄 Updating modules for existing tenant '$tenant_name'"
+                        yq e "(.tenants[] | select(.name == \"$tenant_name\") | .modules) = $modules_yaml" -i "$TENANT_SOURCES_FILE"
+                        success "  ✅ Updated modules for tenant '$tenant_name'"
                     fi
                 fi
             fi
@@ -178,7 +186,11 @@ discover_tenants_from_apps() {
         log "📝 Auto-adding discovered tenants with default quotas..."
         
         for tenant_info in "${discovered_tenants[@]}"; do
-            IFS=':' read -r tenant_name git_org <<< "$tenant_info"
+            # Parse tenant_info which is in format: tenant_name:git_org:modules_json
+            # Need to handle the fact that modules_json might contain colons
+            local tenant_name=$(echo "$tenant_info" | cut -d':' -f1)
+            local git_org=$(echo "$tenant_info" | cut -d':' -f2)
+            local modules_json=$(echo "$tenant_info" | cut -d':' -f3-)
             
             # Get default quotas from discovery settings
             local cpu_quota=$(yq e '.discovery.default_quotas.cpu_quota' "$TENANT_SOURCES_FILE")
@@ -186,12 +198,12 @@ discover_tenants_from_apps() {
             local storage_quota=$(yq e '.discovery.default_quotas.storage_quota' "$TENANT_SOURCES_FILE")
             local gpu_quota=$(yq e '.discovery.default_quotas.gpu_quota' "$TENANT_SOURCES_FILE")
             
-            log "  ➕ Adding tenant '$tenant_name' with default quotas"
+            log "  ➕ Adding tenant '$tenant_name' with default quotas and modules"
             
-            # Add to tenant-sources.yml
-            yq e ".tenants += [{\"name\": \"$tenant_name\", \"git_org\": \"$git_org\", \"description\": \"Auto-discovered tenant\", \"cpu_quota\": \"$cpu_quota\", \"memory_quota\": \"$memory_quota\", \"storage_quota\": \"$storage_quota\", \"gpu_quota\": \"$gpu_quota\", \"environments\": [\"dev\", \"staging\", \"production\"]}]" -i "$TENANT_SOURCES_FILE"
+            # Add to tenant-sources.yml with modules
+            yq e ".tenants += [{\"name\": \"$tenant_name\", \"git_org\": \"$git_org\", \"description\": \"Auto-discovered tenant\", \"cpu_quota\": \"$cpu_quota\", \"memory_quota\": \"$memory_quota\", \"storage_quota\": \"$storage_quota\", \"gpu_quota\": \"$gpu_quota\", \"environments\": [\"dev\", \"staging\", \"production\"], \"modules\": $modules_json}]" -i "$TENANT_SOURCES_FILE"
             
-            success "  ✅ Added tenant '$tenant_name' to tenant-sources.yml"
+            success "  ✅ Added tenant '$tenant_name' with modules to tenant-sources.yml"
         done
     fi
 }
@@ -209,6 +221,7 @@ onboard_tenant() {
     local storage_quota="$5"
     local gpu_quota="$6"
     local environments="$7"
+    local modules_json="$8"
     
     log "🏗️  Processing tenant: $name"
     
@@ -230,6 +243,15 @@ memory_quota   = "$memory_quota"
 storage_quota  = "$storage_quota"
 gpu_quota      = "$gpu_quota"
 EOF
+
+    # Add modules to tfvars if provided and not empty
+    if [[ -n "$modules_json" && "$modules_json" != "null" && "$modules_json" != "[]" ]]; then
+        echo "modules = $modules_json" >> "$tfvars_file"
+        log "  📦 Added modules configuration for tenant '$name'"
+    else
+        echo "modules = []" >> "$tfvars_file"
+        log "  📦 No modules specified for tenant '$name'"
+    fi
     
     log "  📄 Generated Terraform variables for '$name'"
     
@@ -310,11 +332,14 @@ for i in $(seq 0 $((tenant_count - 1))); do
     gpu_quota=$(yq e ".tenants[$i].gpu_quota // \"0\"" "$TENANT_SOURCES_FILE")
     environments=$(yq e ".tenants[$i].environments" "$TENANT_SOURCES_FILE")
     
+    # Extract modules as JSON string for Terraform
+    modules_json=$(yq e ".tenants[$i].modules // [] | to_json" "$TENANT_SOURCES_FILE")
+    
     echo
     log "[$((i+1))/$tenant_count] Processing tenant: $name"
     echo "----------------------------------------"
     
-    if onboard_tenant "$name" "$git_org" "$cpu_quota" "$memory_quota" "$storage_quota" "$gpu_quota" "$environments"; then
+    if onboard_tenant "$name" "$git_org" "$cpu_quota" "$memory_quota" "$storage_quota" "$gpu_quota" "$environments" "$modules_json"; then
         successful_tenants+=("$name")
     else
         failed_tenants+=("$name")

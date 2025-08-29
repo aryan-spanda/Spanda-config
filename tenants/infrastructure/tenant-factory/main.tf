@@ -11,6 +11,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.23"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.11"
+    }
   }
 }
 
@@ -383,4 +387,67 @@ resource "kubernetes_limit_range" "tenant_limit_range" {
       }
     }
   }
+}
+
+# =============================================================================
+# 8. DEPLOY TENANT-SPECIFIC MODULES
+# =============================================================================
+# Deploy platform modules specific to this tenant's requirements
+# Each module is deployed into all of the tenant's environments
+resource "helm_release" "tenant_modules" {
+  # Create a module release for each environment and each module
+  for_each = {
+    for pair in setproduct(var.environments, var.modules) : 
+    "${pair[0]}-${pair[1].name}" => {
+      env    = pair[0]
+      module = pair[1]
+    }
+  }
+
+  name       = "${var.tenant_name}-${each.value.module.name}-${each.value.env}"
+  namespace  = kubernetes_namespace.tenant_namespace[each.value.env].metadata[0].name
+  
+  # For now, we'll use a local chart path structure
+  # In production, you would use a proper Helm repository
+  chart = "../../bare-metal/modules/${each.value.module.name}/helm"
+  
+  # Use version from module specification or default to latest
+  version = lookup(each.value.module, "version", "1.0.0")
+
+  # Pass tenant-specific values to the Helm chart
+  values = [
+    yamlencode(merge(
+      {
+        # Default values passed to all modules
+        spandaTenant      = var.tenant_name
+        spandaEnvironment = each.value.env
+        spandaGitOrg      = var.tenant_git_org
+        
+        # Resource constraints based on tenant quotas
+        resources = {
+          cpu_limit    = var.cpu_quota
+          memory_limit = var.memory_quota
+          gpu_limit    = var.gpu_quota
+        }
+        
+        # Namespace context
+        namespace = kubernetes_namespace.tenant_namespace[each.value.env].metadata[0].name
+      },
+      # Module-specific overrides from platform-requirements.yml
+      lookup(each.value.module, "values", {})
+    ))
+  ]
+
+  # Ensure the namespace is created before deploying the module
+  depends_on = [
+    kubernetes_namespace.tenant_namespace,
+    kubernetes_resource_quota.tenant_quota,
+    kubernetes_limit_range.tenant_limits
+  ]
+
+  # Allow time for namespace and RBAC to be ready
+  timeout = 600
+  
+  # Force recreation if module values change significantly
+  recreate_pods = true
 }

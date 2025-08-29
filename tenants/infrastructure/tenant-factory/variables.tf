@@ -49,3 +49,14 @@ variable "service_quota" {
   type        = string
   default     = "20"
 }
+
+variable "modules" {
+  description = "A list of modules to deploy for the tenant."
+  type = list(object({
+    name        = string
+    version     = string
+    description = optional(string, "")
+    values      = optional(map(any), {})
+  }))
+  default = []
+}

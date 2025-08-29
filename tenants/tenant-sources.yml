@@ -17,6 +17,32 @@ tenants:
     storage_quota: "150Gi"
     gpu_quota: "2"
     environments: ["dev", "staging", "production"]
+    modules:
+      - name: "traditional-bi-baremetal"
+        version: "1.0.0"
+        description: "Traditional BI stack (PostgreSQL, MySQL, Superset)"
+        values:
+          superset:
+            admin_user: "test-app-admin"
+            custom_config: "test-application-specific"
+      - name: "security-vault"
+        version: "1.2.0"
+        description: "HashiCorp Vault secret management"
+        values:
+          vault:
+            ui_enabled: true
+            tenant_specific_policies: true
+      - name: "monitoring-prometheus"
+        version: "1.1.0"
+        description: "Prometheus monitoring stack with Grafana"
+        values:
+          prometheus:
+            retention: "30d"
+            tenant_dashboards: true
+          grafana:
+            custom_dashboards:
+              - "test-application-metrics"
+              - "test-application-business-kpis"
 
   # Example Startup Tenant
   - name: "example-startup"
@@ -26,7 +52,8 @@ tenants:
     memory_quota: "40Gi"
     storage_quota: "100Gi"
     gpu_quota: "1"
-    environments: ["dev", "staging", "production"]  # New Client Template (uncomment and modify for new clients)
+    environments: ["dev", "staging", "production"]
+    modules: []  # No additional modules for this tenant
   # - name: "new-client"
   #   git_org: "new-client-org"
   #   description: "Description of the new client"
