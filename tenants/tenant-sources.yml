@@ -15,7 +15,7 @@ tenants:
     cpu_quota: "30"
     memory_quota: "60Gi"
     storage_quota: "150Gi"
-    gpu_quota: "2"
+    gpu_quota: "0"
     environments: ["dev", "staging", "production"]
     modules:
       - name: "traditional-bi-baremetal"
@@ -25,24 +25,86 @@ tenants:
           superset:
             admin_user: "test-app-admin"
             custom_config: "test-application-specific"
-      - name: "security-vault"
-        version: "1.2.0"
-        description: "HashiCorp Vault secret management"
+      # Temporarily disable security-vault to focus on new modules
+      # - name: "security-vault"
+      #   version: "1.2.0"
+      #   description: "HashiCorp Vault secret management"
+      # Temporarily disable monitoring-prometheus due to timeout issues  
+      # - name: "monitoring-prometheus"
+      #   version: "1.1.0"
+      #   description: "Prometheus monitoring stack with Grafana"
+      - name: "realtime-bi-baremetal"
+        version: "1.0.0"
+        description: "Real-time BI analytics with ClickHouse"
         values:
-          vault:
-            ui_enabled: true
-            tenant_specific_policies: true
-      - name: "monitoring-prometheus"
-        version: "1.1.0"
-        description: "Prometheus monitoring stack with Grafana"
+          clickhouse:
+            cluster_name: "test-app-cluster"
+            # Use ClusterIP services instead of NodePort to avoid conflicts
+            service:
+              type: "ClusterIP"
+            users:
+              - name: "test_app_user"
+                password: "test_secure_123"
+                networks: ["0.0.0.0/0"]
+            databases:
+              - "test_app_analytics"
+              - "test_app_metrics"
+          superset:
+            # Fix storage size to meet 1Gi minimum requirement
+            persistence:
+              size: "2Gi"
+            service:
+              type: "ClusterIP"
+          kafka:
+            cluster_id: "test-app-kafka"
+            topics:
+              - name: "test-app-events"
+                partitions: 3
+                replication_factor: 1
+              - name: "test-app-metrics"
+                partitions: 2
+                replication_factor: 1
+          spark:
+            executor_memory: "2g"
+            driver_memory: "1g"
+            executor_cores: 2
+      - name: "data-lake-baremetal"
+        version: "1.0.0"
+        description: "Data lake infrastructure with MinIO and Kafka"
         values:
-          prometheus:
-            retention: "30d"
-            tenant_dashboards: true
-          grafana:
-            custom_dashboards:
-              - "test-application-metrics"
-              - "test-application-business-kpis"
+          minio:
+            # Use ClusterIP service to avoid NodePort conflicts
+            service:
+              type: "ClusterIP"
+            access_key: "test-app-minio-key"
+            secret_key: "test-app-minio-secret-key-2024"
+            buckets:
+              - name: "test-app-raw-data"
+                policy: "private"
+              - name: "test-app-processed-data"
+                policy: "private"
+              - name: "test-app-backup"
+                policy: "private"
+            # Ensure storage meets minimum requirements
+            storage_size: "50Gi"
+            persistence:
+              size: "50Gi"
+          kafka:
+            cluster_id: "test-app-data-lake"
+            auto_create_topics: true
+            log_retention_hours: 168
+            # Use ClusterIP service to avoid port conflicts
+            service:
+              type: "ClusterIP"
+            topics:
+              - name: "test-app-data-ingestion"
+                partitions: 6
+                replication_factor: 1
+          spark:
+            history_server: true
+            event_log_dir: "s3a://test-app-raw-data/spark-events"
+            executor_memory: "4g"
+            driver_memory: "2g"
 
   # Example Startup Tenant
   - name: "example-startup"

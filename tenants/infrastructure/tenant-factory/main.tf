@@ -21,20 +21,22 @@ terraform {
 # =============================================================================
 # 1. CREATE DEDICATED NAMESPACES FOR EACH ENVIRONMENT
 # =============================================================================
+# Note: Monitoring modules manage their own namespace creation to avoid Helm ownership conflicts
 resource "kubernetes_namespace" "tenant_namespace" {
   for_each = toset(var.environments)
 
   metadata {
     name = "${var.tenant_name}-${each.key}"
     labels = {
-      "spanda.ai/tenant"        = var.tenant_name
-      "spanda.ai/environment"   = each.key
-      "spanda.ai/managed-by"    = "tenant-factory"
+      "spanda.ai/tenant"         = var.tenant_name
+      "spanda.ai/environment"    = each.key
+      "spanda.ai/managed-by"     = "tenant-factory"
       "app.kubernetes.io/part-of" = "spanda-platform"
+      # Don't add Helm metadata here - let modules manage their own namespace labels
     }
     annotations = {
-      "spanda.ai/created-by" = "tenant-factory"
-      "spanda.ai/tenant-org" = var.tenant_git_org
+      "spanda.ai/created-by"     = "tenant-factory"
+      "spanda.ai/tenant-org"     = var.tenant_git_org
     }
   }
 }
@@ -397,22 +399,30 @@ resource "kubernetes_limit_range" "tenant_limit_range" {
 resource "helm_release" "tenant_modules" {
   # Create a module release for each environment and each module
   for_each = {
-    for pair in setproduct(var.environments, var.modules) : 
-    "${pair[0]}-${pair[1].name}" => {
-      env    = pair[0]
-      module = pair[1]
-    }
+    for item in flatten([
+      for env in var.environments : [
+        for module in var.modules : {
+          key    = "${env}-${module.name}"
+          env    = env
+          module = module
+        }
+      ]
+    ]) : item.key => item
   }
 
-  name       = "${var.tenant_name}-${each.value.module.name}-${each.value.env}"
+  # Use a hash-based naming to ensure uniqueness and length compliance
+  name       = substr(replace("${var.tenant_name}-${each.value.module.name}-${each.value.env}", "_", "-"), 0, 53)
   namespace  = kubernetes_namespace.tenant_namespace[each.value.env].metadata[0].name
   
-  # For now, we'll use a local chart path structure
-  # In production, you would use a proper Helm repository
-  chart = "../../bare-metal/modules/${each.value.module.name}/helm"
+  # Use the actual path to the helm charts in the platform deployment repo
+  chart = "../../../spandaai-platform-deployment/bare-metal/modules/${each.value.module.name}/helm"
   
   # Use version from module specification or default to latest
   version = lookup(each.value.module, "version", "1.0.0")
+  
+  # Don't let Helm manage the namespace - Terraform already created it
+  # All modules should use the tenant namespace for proper monitoring access
+  create_namespace = false
 
   # Pass tenant-specific values to the Helm chart
   values = [
@@ -423,18 +433,41 @@ resource "helm_release" "tenant_modules" {
         spandaEnvironment = each.value.env
         spandaGitOrg      = var.tenant_git_org
         
+        # Override namespace to deploy in tenant namespace instead of platform namespace
+        namespace = kubernetes_namespace.tenant_namespace[each.value.env].metadata[0].name
+        
+        # Global namespace override for modules that use global.namespace
+        global = {
+          namespace = kubernetes_namespace.tenant_namespace[each.value.env].metadata[0].name
+        }
+        
         # Resource constraints based on tenant quotas
         resources = {
           cpu_limit    = var.cpu_quota
           memory_limit = var.memory_quota
           gpu_limit    = var.gpu_quota
         }
-        
-        # Namespace context
-        namespace = kubernetes_namespace.tenant_namespace[each.value.env].metadata[0].name
       },
-      # Module-specific overrides from platform-requirements.yml
-      lookup(each.value.module, "values", {})
+      # Module configurations from platform-requirements.yml with fixes
+      merge(
+        lookup(each.value.module, "values", {}),
+        # Fix storage and NodePort issues for traditional-bi-baremetal
+        each.value.module.name == "traditional-bi-baremetal" ? {
+          superset = {
+            persistence = {
+              size = each.value.env == "production" ? "5Gi" : "2Gi"  # Fix: minimum 1Gi
+            }
+            service = {
+              nodePort = each.value.env == "dev" ? 30810 : (each.value.env == "staging" ? 30811 : 30812)  # Fix: unique ports
+            }
+          }
+          postgresql = {
+            persistence = {
+              size = each.value.env == "production" ? "3Gi" : "1Gi"  # Fix: minimum 1Gi
+            }
+          }
+        } : {}
+      )
     ))
   ]
 
@@ -442,7 +475,7 @@ resource "helm_release" "tenant_modules" {
   depends_on = [
     kubernetes_namespace.tenant_namespace,
     kubernetes_resource_quota.tenant_quota,
-    kubernetes_limit_range.tenant_limits
+    kubernetes_limit_range.tenant_limit_range
   ]
 
   # Allow time for namespace and RBAC to be ready

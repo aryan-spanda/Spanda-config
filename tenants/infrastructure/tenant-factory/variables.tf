@@ -52,11 +52,6 @@ variable "service_quota" {
 
 variable "modules" {
   description = "A list of modules to deploy for the tenant."
-  type = list(object({
-    name        = string
-    version     = string
-    description = optional(string, "")
-    values      = optional(map(any), {})
-  }))
-  default = []
+  type        = any
+  default     = []
 }

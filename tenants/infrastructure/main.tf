@@ -11,12 +11,27 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.23"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.11"
+    }
   }
 }
 
 # Configure the Kubernetes provider to use local cluster
 provider "kubernetes" {
-  config_path = "~/.kube/config"
+  host         = "https://127.0.0.1:42361"
+  config_path  = "~/.kube/config"
+  config_context = "kind-spanda-cluster"
+}
+
+# Configure the Helm provider to use local cluster
+provider "helm" {
+  kubernetes {
+    host        = "https://127.0.0.1:42361"
+    config_path = "~/.kube/config"
+    config_context = "kind-spanda-cluster"
+  }
 }
 
 # =============================================================================
@@ -37,4 +52,5 @@ module "tenant" {
   gpu_quota      = var.gpu_quota
   pod_quota      = var.pod_quota
   service_quota  = var.service_quota
+  modules        = var.modules
 }

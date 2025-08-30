@@ -49,3 +49,9 @@ variable "service_quota" {
   type        = string
   default     = "20"
 }
+
+variable "modules" {
+  description = "A list of modules to deploy for the tenant."
+  type        = any
+  default     = []
+}

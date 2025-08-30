@@ -57,6 +57,11 @@ echo "==============================================================="
 # =============================================================================
 log "🔍 Checking prerequisites..."
 
+# Kubectl wrapper function with proper timeout and KUBECONFIG
+kubectl_cmd() {
+    KUBECONFIG=~/.kube/config kubectl --request-timeout=10s "$@"
+}
+
 check_command() {
     if ! command -v "$1" &> /dev/null; then
         error "❌ $1 is not installed. Please install it to proceed."
@@ -73,7 +78,7 @@ check_command "curl" || exit 1
 check_command "jq" || exit 1
 
 # Check Kubernetes connectivity
-if ! kubectl cluster-info &> /dev/null; then
+if ! kubectl_cmd cluster-info &> /dev/null; then
     error "❌ Cannot connect to Kubernetes cluster. Ensure your KUBECONFIG is set correctly."
     exit 1
 fi
@@ -137,9 +142,17 @@ discover_tenants_from_apps() {
     
     local discovered_tenants=()
     
-    while IFS= read -r repo_url; do
-        # Skip empty lines and comments
-        [[ -z "$repo_url" || "$repo_url" =~ ^[[:space:]]*# ]] && continue
+    # Get the number of applications
+    local app_count
+    app_count=$(yq e '.applications | length' "$APPLICATION_SOURCES_FILE")
+    
+    for ((i=0; i<app_count; i++)); do
+        # Extract repository URL from YAML structure
+        local repo_url
+        repo_url=$(yq e ".applications[$i].git.url" "$APPLICATION_SOURCES_FILE")
+        
+        # Skip if URL is null or empty
+        [[ -z "$repo_url" || "$repo_url" == "null" ]] && continue
         
         log "  🔍 Scanning repository: $repo_url"
         
@@ -179,7 +192,7 @@ discover_tenants_from_apps() {
             
             rm -f "$temp_file"
         fi
-    done < "$APPLICATION_SOURCES_FILE"
+    done
     
     # Auto-add discovered tenants with default quotas
     if [[ ${#discovered_tenants[@]} -gt 0 ]]; then
@@ -226,7 +239,7 @@ onboard_tenant() {
     log "🏗️  Processing tenant: $name"
     
     # Check if the tenant's ArgoCD AppProject already exists
-    if kubectl get appproject "$name" -n argocd --ignore-not-found 2>/dev/null | grep -q "$name"; then
+    if kubectl_cmd get appproject "$name" -n argocd --ignore-not-found 2>/dev/null | grep -q "$name"; then
         success "  ✅ Tenant '$name' already exists in the cluster. Skipping."
         return 0
     fi
@@ -264,14 +277,14 @@ EOF
         log "  🔍 Verifying tenant deployment..."
         
         # Check ArgoCD project
-        if kubectl get appproject "$name" -n argocd >/dev/null 2>&1; then
+        if kubectl_cmd get appproject "$name" -n argocd >/dev/null 2>&1; then
             success "    ✅ ArgoCD project created"
         else
             warn "    ⚠️  ArgoCD project not found"
         fi
         
         # Check namespaces
-        local namespace_count=$(kubectl get namespaces -l "spanda.ai/tenant=$name" --no-headers 2>/dev/null | wc -l)
+        local namespace_count=$(kubectl_cmd get namespaces -l "spanda.ai/tenant=$name" --no-headers 2>/dev/null | wc -l)
         success "    ✅ Created $namespace_count tenant namespaces"
         
     else
